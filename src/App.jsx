@@ -368,6 +368,7 @@ const INITIAL_TRANSACTIONS = [
 export default function App() {
   // Navigation & Core State
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [binderFilter, setBinderFilter] = useState('ALL');
   const [cards, setCards] = useState([]);
   const [transactions, setTransactions] = useState([]);
 
@@ -377,7 +378,7 @@ export default function App() {
     'Binder 1 - High End',
     'Binder 2 - AR / SR',
     'Brankas Slab Utama',
-    'Rak Sealed Box'
+    'Rak Sealed Box', 'Binder 3', 'Binder 4', 'Binder 5', 'Binder 6', 'Binder 7', 'Binder 8', 'Binder 9', 'Binder 10', 'Toploader Box', 'Deck Box', 'Rak Booster Pack', 'Brankas 2'
   ]);
 
   // Inventory Filters
@@ -753,8 +754,8 @@ export default function App() {
       number: cardForm.number.trim() || '-',
       language: cardForm.language,
       category: cardForm.category,
-      gradingCompany: cardForm.gradingCompany,
-      grade: cardForm.grade.trim() || (cardForm.gradingCompany === 'Raw' ? 'Raw NM/M' : `${cardForm.gradingCompany} 10`),
+      gradingCompany: cardForm.category === 'Graded Slab' ? (cardForm.gradingCompany === 'Raw' ? 'PSA' : cardForm.gradingCompany) : 'Raw',
+      grade: cardForm.category === 'Graded Slab' ? (cardForm.gradingCompany === 'Raw' ? 'PSA 10' : cardForm.grade.trim() || `${cardForm.gradingCompany} 10`) : cardForm.category === 'Single Card' ? (cardForm.gradingCompany === 'Raw' ? cardForm.grade.trim() || 'Raw NM/M' : 'Raw NM/M') : 'Raw',
       storageLocation: cardForm.storageLocation,
       buyPrice: parseDotNumber(cardForm.buyPrice),
       targetPrice: parseDotNumber(cardForm.targetPrice),
@@ -993,6 +994,7 @@ export default function App() {
   };
 
   const handleRemoveStorageLocation = (name) => {
+    if (cards.some(c=>c.storageLocation===name)) { showToast('Lokasi masih memiliki kartu atau arsip terjual.', 'error'); return; }
     if (storageLocations.length <= 1) {
       showToast('Minimal harus tersisa 1 lokasi penyimpanan.', 'error');
       return;
@@ -1265,11 +1267,13 @@ export default function App() {
             {id:'dashboard',label:'Beranda',icon:LayoutDashboard},
             {id:'inventory',label:'Stok',icon:Package},
             {id:'pos',label:'Kasir',icon:ShoppingBag},
+            {id:'add-card',label:'Tambah kartu',icon:Plus},
             {id:'trade',label:'Trade-in',icon:ArrowLeftRight},
             {id:'history',label:'Laporan',icon:BarChart3},
             {id:'settings',label:'Kelola',icon:Tags}
           ].map(({id,label,icon:Icon}) => {
-            const active = id === 'history' ? ['history','sold'].includes(activeTab) : activeTab === id;
+            if (id === 'add-card') return <button key={id} type="button" className="cx-nav-add" aria-label="Tambah kartu" title="Tambah kartu" onClick={handleOpenAddCard}><Icon aria-hidden="true" /></button>;
+            const active = id === 'history' ? ['history','sold','binders'].includes(activeTab) : activeTab === id;
             return <button key={id} type="button" aria-current={active?'page':undefined} className={active?'cx-current':''} onClick={()=>setActiveTab(id)}><Icon className="w-5 h-5"/><span>{label}</span></button>;
           })}
         </nav>
@@ -1277,8 +1281,18 @@ export default function App() {
 
       {/* Main Content Container */}
       <main className="cx-main relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
-        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',settings:'Atur kategori dan lokasi penyimpanan.'}[activeTab]}</p></div>
-        {['history','sold'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat & laba</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button></nav>}
+        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan lokasi penyimpanan.'}[activeTab]}</p></div>
+        {['history','sold','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat & laba</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button></nav>}
+        {activeTab==='binders' && <section className="space-y-3">
+          <select aria-label="Pilih lokasi laporan" value={binderFilter} onChange={e=>setBinderFilter(e.target.value)} className="w-full sm:w-72 px-3 py-2 rounded-xl border border-slate-200 bg-white"><option value="ALL">Semua lokasi</option>{[...new Set([...storageLocations,...cards.map(c=>c.storageLocation||'Tanpa lokasi')])].map(loc=><option key={loc}>{loc}</option>)}</select>
+          <p className="text-xs text-slate-500">Laporan berdasarkan lokasi kartu yang tercatat saat ini. Nilai keluar mencakup SOLD dan trade-in; bukan omzet kas atau laba transaksi final.</p>
+          {[...new Set([...storageLocations,...cards.map(c=>c.storageLocation||'Tanpa lokasi')])].filter(loc=>binderFilter==='ALL'||loc===binderFilter).map(loc=>{
+            const all=cards.filter(c=>(c.storageLocation||'Tanpa lokasi')===loc), active=all.filter(c=>c.status==='IN_STOCK'), sold=all.filter(c=>c.status==='SOLD');
+            const total=(items,key)=>items.reduce((n,c)=>n+(Number(c[key])||0),0);
+            const cost=total(active,'buyPrice'), target=total(active,'targetPrice'), out=total(sold,'soldPrice'), outCost=total(sold,'buyPrice');
+            return <article key={loc} className="rounded-2xl bg-white border border-slate-200 p-4"><div className="flex justify-between gap-2 items-center mb-3"><h3 className="font-bold text-slate-900">{loc}</h3><span className="text-xs text-slate-500">{active.length} aktif · {sold.length} keluar</span></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[['Modal stok',cost],['Target jual',target],['Potensi laba',target-cost],['HPP kartu keluar',outCost],['Nilai kartu keluar',out],['Selisih nilai keluar',out-outCost]].map(([label,value])=><div key={label} className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">{label}</div><div className="font-bold text-sm text-emerald-800 break-words">{formatIDR(value)}</div></div>)}</div></article>;
+          })}
+        </section>}
         {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Penyimpanan <span>{storageLocations.length}</span></button></div>}
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
@@ -2957,7 +2971,7 @@ export default function App() {
                           e.preventDefault();
                           const created = handleAddCategory(inlineCategoryName);
                           if (created) {
-                            setCardForm({ ...cardForm, category: created });
+                            setCardForm({ ...cardForm, category: created, gradingCompany: created === 'Graded Slab' ? 'PSA' : 'Raw', grade: created === 'Graded Slab' ? 'PSA 10' : 'Raw NM/M' });
                             setInlineCategoryName('');
                             setShowInlineCategoryInput(false);
                           }
@@ -2971,7 +2985,7 @@ export default function App() {
                       onClick={() => {
                         const created = handleAddCategory(inlineCategoryName);
                         if (created) {
-                          setCardForm({ ...cardForm, category: created });
+                          setCardForm({ ...cardForm, category: created, gradingCompany: created === 'Graded Slab' ? 'PSA' : 'Raw', grade: created === 'Graded Slab' ? 'PSA 10' : 'Raw NM/M' });
                           setInlineCategoryName('');
                           setShowInlineCategoryInput(false);
                         }
@@ -2984,7 +2998,7 @@ export default function App() {
                 ) : (
                   <select
                     value={cardForm.category}
-                    onChange={(e) => setCardForm({ ...cardForm, category: e.target.value })}
+                    onChange={(e) => setCardForm({ ...cardForm, category: e.target.value, gradingCompany: e.target.value === 'Graded Slab' ? 'PSA' : 'Raw', grade: e.target.value === 'Graded Slab' ? 'PSA 10' : 'Raw NM/M' })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                   >
                     {categories.map((cat) => (
@@ -2996,12 +3010,13 @@ export default function App() {
                 )}
               </div>
 
+              {cardForm.category === 'Graded Slab' && <>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Jenis Grading / Raw
                 </label>
                 <select
-                  value={cardForm.gradingCompany}
+                  value={cardForm.gradingCompany === 'Raw' ? 'PSA' : cardForm.gradingCompany}
                   onChange={(e) => {
                     const co = e.target.value;
                     setCardForm({
@@ -3012,7 +3027,7 @@ export default function App() {
                   }}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 >
-                  {GRADING_COMPANIES.map((g) => (
+                  {GRADING_COMPANIES.filter(g => g !== 'Raw').map((g) => (
                     <option key={g} value={g}>
                       {g}
                     </option>
@@ -3033,74 +3048,13 @@ export default function App() {
                 />
               </div>
 
+              </>}
+              {cardForm.category === 'Single Card' && <div><label className="block text-xs font-bold text-slate-700 mb-1">Kondisi kartu (Raw)</label><select className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm" value={['Raw NM/M','Raw LP','Raw MP','Raw HP','Raw DMG'].includes(cardForm.grade) ? cardForm.grade : 'Raw NM/M'} onChange={e=>setCardForm({...cardForm,gradingCompany:'Raw',grade:e.target.value})}>{['Raw NM/M','Raw LP','Raw MP','Raw HP','Raw DMG'].map(g=><option key={g}>{g}</option>)}</select></div>}
               <div className="sm:col-span-2">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700">Lokasi Penyimpanan Fisik</label>
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <button
-                      type="button"
-                      onClick={() => setShowInlineStorageInput((v) => !v)}
-                      className="text-emerald-700 font-bold hover:underline"
-                    >
-                      + Tambah Baru
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsStorageModalOpen(true)}
-                      className="text-slate-600 hover:text-slate-900"
-                    >
-                      Kelola
-                    </button>
-                  </div>
-                </div>
-                {showInlineStorageInput ? (
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={inlineStorageName}
-                      onChange={(e) => setInlineStorageName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          const created = handleAddStorageLocation(inlineStorageName);
-                          if (created) {
-                            setCardForm({ ...cardForm, storageLocation: created });
-                            setInlineStorageName('');
-                            setShowInlineStorageInput(false);
-                          }
-                        }
-                      }}
-                      placeholder="Contoh: Binder 3 - Ultra Rare"
-                      className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-emerald-500 text-xs text-slate-900"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const created = handleAddStorageLocation(inlineStorageName);
-                        if (created) {
-                          setCardForm({ ...cardForm, storageLocation: created });
-                          setInlineStorageName('');
-                          setShowInlineStorageInput(false);
-                        }
-                      }}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
-                    >
-                      Simpan
-                    </button>
-                  </div>
-                ) : (
-                  <select
-                    value={cardForm.storageLocation}
-                    onChange={(e) => setCardForm({ ...cardForm, storageLocation: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
-                  >
-                    {storageLocations.map((loc) => (
-                      <option key={loc} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <label className="block text-xs font-bold text-slate-700 mb-1">Lokasi Penyimpanan Fisik</label>
+                <select value={cardForm.storageLocation} onChange={e=>setCardForm({...cardForm,storageLocation:e.target.value})} className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm">
+                  {storageLocations.map(loc=><option key={loc} value={loc}>{loc}</option>)}
+                </select>
               </div>
 
               </div></details>
