@@ -465,6 +465,7 @@ export default function App() {
 
   const [connection, setConnection] = useState('loading');
   const [connectionError, setConnectionError] = useState('');
+  const [masterError, setMasterError] = useState('');
   const [saving, setSaving] = useState(false);
   const lock = useRef(false);
   const photoBusy = useRef(false);
@@ -487,28 +488,38 @@ export default function App() {
     const response = await fetch(base + path, { method, ...(body === undefined ? {} : {headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)}), cache: 'no-store' });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || `API ${response.status}: ${path}`);
+      throw new Error(`API ${response.status} ${path}: ${error.message || 'Request gagal'}`);
     }
     return response.json();
   };
   const loadData = async () => {
-    setConnection('loading');
+    setConnection('loading'); setConnectionError(''); setMasterError('');
     try {
-      const [loadedCards, loadedTransactions, master] = await Promise.all([api('/cards'), api('/transactions'), api('/master-data')]);
-      if (!Array.isArray(loadedCards) || !Array.isArray(loadedTransactions)) throw new Error('Format respons API tidak valid');
+      const [loadedCards, loadedTransactions] = await Promise.all([api('/cards'), api('/transactions')]);
+      if (!Array.isArray(loadedCards) || !Array.isArray(loadedTransactions)) throw new Error('Format respons kartu/transaksi tidak valid');
       setCards(loadedCards); setTransactions(loadedTransactions);
-      if (!Array.isArray(master.categories) || !Array.isArray(master.storageLocations)) throw new Error('Master data tidak valid');
-      setCategories(master.categories);
-      setStorageLocations(master.storageLocations);
-      setTradeInItems(prev => prev.map(row => ({...row,
-        category: master.categories.includes(row.category) ? row.category : master.categories[0] || '',
-        storageLocation: master.storageLocations.includes(row.storageLocation) ? row.storageLocation : master.storageLocations[0] || ''
-      })));
+      try {
+        const master = await api('/master-data');
+        if (!Array.isArray(master?.categories) || !Array.isArray(master?.storageLocations)) throw new Error('Format master data tidak valid');
+        setCategories(master.categories);
+        setStorageLocations(master.storageLocations);
+        setTradeInItems(prev => prev.map(row => ({...row,
+          category: master.categories.includes(row.category) ? row.category : master.categories[0] || '',
+          storageLocation: master.storageLocations.includes(row.storageLocation) ? row.storageLocation : master.storageLocations[0] || ''
+        })));
+      } catch (error) {
+        // Read-only browsing: do not seed or write master data during an outage.
+        const active = loadedCards.filter(c => c.status === 'IN_STOCK');
+        setCategories([...new Set(active.map(c=>c.category).filter(Boolean))]);
+        setStorageLocations([...new Set(active.map(c=>c.storageLocation).filter(Boolean))]);
+        setMasterError(error.message);
+      }
       setConnection('ready');
     } catch (error) { setConnectionError(error.message); setConnection('error'); }
   };
   useEffect(() => { loadData(); }, []);
   const persist = async (action) => {
+    if (masterError) { showToast('Mode baca saja. Coba sambungkan ulang master data.', 'error'); return false; }
     if (lock.current || connection !== 'ready') return false;
     lock.current = true; setSaving(true);
     try { await action(); return true; }
@@ -691,6 +702,7 @@ export default function App() {
 
   // --- CRUD CARD HANDLERS ---
   const handleOpenAddCard = () => {
+    if (masterError) { showToast('Mode baca saja. Sambungkan ulang master data.', 'error'); return; }
     setEditingCard(null);
     setShowInlineCategoryInput(false);
     setShowInlineStorageInput(false);
@@ -1233,7 +1245,20 @@ export default function App() {
 
   const openCardDetail = (card) => setSelectedDetailCard(card);
 
-  if (connection !== 'ready') return <div className="min-h-screen bg-slate-50 text-slate-800 p-8"><h1 className="text-xl font-bold text-emerald-700">CARDEXX</h1><p className="my-4">{connection === 'loading' ? 'Memuat data dari database...' : 'Koneksi database gagal: ' + connectionError}</p>{connection === 'error' && <button className="bg-emerald-700 text-white rounded px-4 py-2" onClick={loadData}>Coba lagi</button>}</div>;
+  if (connection === 'loading') return (
+    <main role="status" aria-live="polite" aria-busy="true" style={{minHeight:'100dvh',display:'grid',placeItems:'center',background:'#f5f7f8',padding:24,textAlign:'center',color:'#065f46'}}>
+      <style>{`@keyframes cxLoadingSpin { to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { .cx-loading-ring { animation: none !important; } }`}</style>
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
+        <div style={{position:'relative',width:104,height:104,display:'grid',placeItems:'center',marginBottom:8}}>
+          <div aria-hidden="true" className="cx-loading-ring" style={{position:'absolute',inset:0,border:'3px solid #d1fae5',borderTopColor:'#059669',borderRightColor:'#fbbf24',borderRadius:'50%',animation:'cxLoadingSpin 1.15s linear infinite'}} />
+          <RayquazaLogo className="w-16 h-16" />
+        </div>
+        <h1 style={{fontSize:28,fontWeight:900,letterSpacing:3,margin:0}}>CARDEXX</h1>
+        <p style={{fontSize:12,letterSpacing:2,color:'#64748b',margin:0}}>TCG WORKSPACE</p>
+      </div>
+    </main>
+  );
+  if (connection === 'error') return <div className="min-h-screen bg-slate-50 text-slate-800 p-8"><h1 className="text-xl font-bold text-emerald-700">CARDEXX</h1><p className="my-4">{'Koneksi database gagal: ' + connectionError}</p><button className="bg-emerald-700 text-white rounded px-4 py-2" onClick={loadData}>Coba lagi</button></div>;
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-emerald-500/30 selection:text-emerald-700 relative overflow-x-hidden">
       {(saving || processingPhoto) && <div className="fixed inset-0 z-[100] bg-slate-950/50 flex items-center justify-center" role="status"><span className="bg-white p-4 rounded-xl">{processingPhoto ? "Mengompres foto..." : "Menyimpan ke database..."}</span></div>}
@@ -1279,6 +1304,7 @@ export default function App() {
 
       {/* Main Content Container */}
       <main className="cx-main relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
+        {masterError && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Mode baca saja — daftar binder dan kategori belum dapat dimuat.</strong><p className="my-2">{masterError}. Stok dan laporan tetap dapat dilihat. Penyimpanan perubahan dinonaktifkan sementara.</p><button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-white" onClick={loadData}>Coba sambungkan ulang</button></div>}
         <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan lokasi penyimpanan.'}[activeTab]}</p></div>
         {['history','sold','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat & laba</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button></nav>}
         {activeTab==='binders' && <section className="space-y-3">
