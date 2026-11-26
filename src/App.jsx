@@ -1261,7 +1261,17 @@ export default function App() {
   if (connection === 'error') return <div className="min-h-screen bg-slate-50 text-slate-800 p-8"><h1 className="text-xl font-bold text-emerald-700">CARDEXX</h1><p className="my-4">{'Koneksi database gagal: ' + connectionError}</p><button className="bg-emerald-700 text-white rounded px-4 py-2" onClick={loadData}>Coba lagi</button></div>;
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-emerald-500/30 selection:text-emerald-700 relative overflow-x-hidden">
-      {(saving || processingPhoto) && <div className="fixed inset-0 z-[100] bg-slate-950/50 flex items-center justify-center" role="status"><span className="bg-white p-4 rounded-xl">{processingPhoto ? "Mengompres foto..." : "Menyimpan ke database..."}</span></div>}
+      {(saving || processingPhoto) && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/20 backdrop-blur-[1px] flex items-center justify-center" role="status" aria-live="polite">
+          <div className="rounded-2xl bg-white/95 shadow-2xl border border-slate-200 px-5 py-4 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-emerald-700 animate-spin" />
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-slate-800">Mohon tunggu</p>
+              <p className="text-xs text-slate-500">{processingPhoto ? 'Memproses foto…' : 'Memproses perubahan…'}</p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Toast Notification */}
       {toast && (
         <div
@@ -1580,7 +1590,9 @@ export default function App() {
 
               <div className="flex flex-col gap-3">
                 <div className="relative w-full">
-                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                    <Search className="w-4 h-4 text-slate-600" />
+                  </span>
                   <input
                     type="text"
                     value={searchQuery}
@@ -1874,78 +1886,85 @@ export default function App() {
             {soldCards.length === 0 ? (
               <div className="rounded-2xl bg-white border border-dashed border-slate-200 p-10 text-center">
                 <Archive className="w-10 h-10 text-slate-500 mx-auto mb-2" />
-                <p className="text-sm font-bold text-slate-700">Belum ada kartu berstatus Sold untuk filter ini</p>
+                <p className="text-sm font-bold text-slate-700">{activeTab==='traded' ? 'Belum ada kartu ditukar untuk filter ini' : 'Belum ada kartu terjual untuk filter ini'}</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3.5">
                 {soldCards.map((card) => {
                   const realizedProfit = (card.soldPrice || 0) - (card.buyPrice || 0);
                   const tcgMeta = getTcgMeta(card.tcg);
+                  const gradingCo = (card.gradingCompany || 'Raw').trim();
                   return (
                     <div
                       key={card.id}
                       onClick={() => openCardDetail(card)}
-                      className="cursor-pointer rounded-2xl bg-white border border-slate-200 hover:border-amber-500/40 overflow-hidden transition"
+                      className="group cursor-pointer rounded-2xl bg-white border border-slate-200 hover:border-amber-500/40 overflow-hidden transition shadow-sm"
                     >
-                      <div className="relative h-36 bg-slate-50 border-b border-slate-200">
+                      <div className="relative h-36 sm:h-44 bg-slate-100 border-b border-slate-200 overflow-hidden">
                         {card.imageUrl ? (
-                          <img
-                            src={card.imageUrl}
-                            alt={card.name}
-                            loading="lazy" decoding="async" className="w-full h-full object-contain p-2 opacity-85"
-                          />
+                          <img src={card.imageUrl} alt={card.name} loading="lazy" decoding="async" className="w-full h-full object-contain p-2 sm:p-3 transition-transform group-hover:scale-[1.02]" />
                         ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center">
-                            <RayquazaLogo className="w-10 h-10 opacity-40" />
-                            <span className="text-[10px] font-bold text-slate-500 mt-1">
-                              {tcgMeta.label.toUpperCase()}
-                            </span>
+                          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 p-3">
+                            <RayquazaLogo className="w-12 h-12 opacity-60" />
+                            <span className="text-[10px] font-bold text-slate-500 mt-1">{tcgMeta.label.toUpperCase()}</span>
                           </div>
                         )}
-                        <div className="absolute top-2 left-2 flex items-center gap-1">
-                          <span
-                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border ${tcgMeta.badgeClass}`}
-                          >
-                            {card.tcg === 'ONE_PIECE' ? 'OP' : 'PKM'}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-[10px] font-extrabold text-rose-700">
-                            {card.status} • {card.language}
-                          </span>
+
+                        <div className="absolute top-2 left-2 flex flex-wrap items-center gap-1 max-w-[78%]">
+                          <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border ${tcgMeta.badgeClass}`}>{card.tcg === 'ONE_PIECE' ? 'OP' : 'PKM'}</span>
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-[10px] font-extrabold text-amber-800">{card.language}</span>
+                          <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold border ${gradingCo === 'Raw' ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-emerald-50 border-emerald-500/40 text-emerald-700'}`}>{card.grade}</span>
                         </div>
-                        <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-700">
-                          {card.grade}
-                        </span>
+
+                        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteCard(e, card.id)}
+                            className="p-1.5 rounded-lg bg-white/95 hover:bg-rose-500 text-slate-700 hover:text-white border border-slate-200 transition"
+                            title="Hapus Kartu"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="absolute bottom-2 left-2">
+                          <span className={`px-2 py-0.5 rounded-md border text-[10px] font-extrabold ${activeTab==='traded' ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-rose-50 border-rose-300 text-rose-700'}`}>{activeTab==='traded' ? 'TRADED' : 'SOLD'}</span>
+                        </div>
                       </div>
 
-                      <div className="p-3 space-y-2">
+                      <div className="p-2 sm:p-3 space-y-2">
                         <div>
-                          <h3 className="text-xs sm:text-sm font-extrabold text-slate-700 truncate">{card.name}</h3>
-                          <p className="text-[11px] text-slate-500 truncate">
-                            {card.setName ? `${card.setName} • ${card.number}` : `No. ${card.number}`}
-                          </p>
+                          <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 line-clamp-1 group-hover:text-amber-700 transition">{card.name}</h3>
+                          <p className="text-[11px] text-slate-600 truncate">{card.setName ? <>{card.setName} • <span className="text-slate-700 font-semibold">{card.number}</span></> : <span className="text-slate-700 font-semibold">No. {card.number}</span>}</p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-1.5 text-xs">
-                          <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                        <div className="hidden sm:flex items-center justify-between text-[10px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                          <span className="truncate">{card.category}</span>
+                          <span className="font-bold truncate max-w-[110px] text-slate-700">{card.storageLocation || '-'}</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
+                          <div className="hidden sm:block p-2 rounded-xl bg-slate-50 border border-slate-200">
                             <span className="block text-[10px] text-slate-500">Modal</span>
-                            <span className="font-bold text-slate-700">{formatIDR(card.buyPrice)}</span>
+                            <span className="text-xs font-bold text-slate-700">{formatIDR(card.buyPrice)}</span>
                           </div>
                           <div className="p-2 rounded-xl bg-slate-50 border border-amber-500/20">
-                            <span className="block text-[10px] text-amber-800">{activeTab==='traded'?'Harga Deal':'Laku Di'}</span>
-                            <span className="font-extrabold text-amber-800">{formatIDR(card.soldPrice)}</span>
+                            <span className="block text-[10px] text-amber-700">{activeTab==='traded'?'Harga Deal':'Laku Di'}</span>
+                            <span className="text-xs font-extrabold text-amber-800">{formatIDR(card.soldPrice)}</span>
                           </div>
                         </div>
+                      </div>
 
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-[11px]">
-                          <span className="text-slate-500">Profit Bersih</span>
-                          <span
-                            className={`font-extrabold ${
-                              realizedProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
-                            }`}
+                      <div className="hidden sm:block px-3 pb-3 pt-1">
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+                          <span className={`text-[10px] font-bold ${realizedProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{realizedProfit >= 0 ? '+' : ''}{formatIDR(realizedProfit)}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteCard(e, card.id)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-500 text-rose-700 hover:text-white text-[11px] font-extrabold transition"
                           >
-                            {realizedProfit >= 0 ? '+' : ''}
-                            {formatIDR(realizedProfit)}
-                          </span>
+                            Hapus
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2354,7 +2373,6 @@ export default function App() {
         {/* ==================== TAB 6: RIWAYAT & LABA ==================== */}
         {activeTab === 'history' && (
           <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">{[['ALL','Semua'],['PURCHASE','Pembelian'],['SALE','Penjualan'],['TRADE_IN','Trade-in']].map(([value,label])=><button key={value} type="button" onClick={()=>setHistoryTypeFilter(value)} className={`rounded-xl border px-3 py-2 text-sm font-semibold ${historyTypeFilter===value?'bg-emerald-100 border-emerald-500 text-emerald-800':'bg-white border-slate-200 text-slate-700'}`}>{label}</button>)}<button type="button" onClick={handleOpenAddCard} className="rounded-xl bg-emerald-700 px-3 py-2 text-sm font-bold text-white">+ Pembelian</button><button type="button" onClick={()=>setActiveTab('pos')} className="rounded-xl border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700">+ Penjualan</button></div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[['Total pembelian',filteredTransactions.filter(t=>t.type==='PURCHASE').reduce((n,t)=>n+Number(t.costBasis||0),0)],['Total penjualan',filteredTransactions.filter(t=>t.type==='SALE').reduce((n,t)=>n+Number(t.revenue||0),0)],['Keuntungan transaksi',filteredTransactions.filter(t=>t.type!=='PURCHASE').reduce((n,t)=>n+Number(t.netProfit||0),0)]].map(([label,value])=><div key={label} className="rounded-xl bg-white border border-slate-200 p-3"><div className="text-xs text-slate-500">{label}</div><strong className="text-emerald-800 break-words">{formatIDR(value)}</strong></div>)}</div>
             <div className="rounded-2xl bg-white border border-slate-200 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap flex-1 items-center gap-2">
@@ -2611,7 +2629,7 @@ export default function App() {
                 </button>
               </div>
 
-              {selectedDetailCard.status === 'IN_STOCK' && <button type="button" className="sm:hidden text-xs font-bold text-rose-700" onClick={e=>{handleDeleteCard(e, selectedDetailCard.id);setSelectedDetailCard(null);}}>Hapus kartu</button>}
+              <button type="button" className="sm:hidden text-xs font-bold text-rose-700" onClick={e=>{handleDeleteCard(e, selectedDetailCard.id);setSelectedDetailCard(null);}}>Hapus kartu</button>
               {selectedDetailCard.status === 'IN_STOCK' && (
                 <button
                   type="button"
