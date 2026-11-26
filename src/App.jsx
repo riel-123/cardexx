@@ -1141,7 +1141,7 @@ export default function App() {
   };
 
   const handleExportInventoryExcel = () => {
-    const exportCards = availableInventory.filter(c=>exportStorage==='ALL'||c.storageLocation===exportStorage);
+    const exportCards = filteredCards;
     try {
       const headers = [
         'ID Kartu',
@@ -1318,10 +1318,10 @@ export default function App() {
           })}
         </section>}
         {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Binder <span>{storageLocations.length}</span></button></div>}
-        {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div></div></section>}
+
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-4"><div className="grid grid-cols-2 gap-2">{[['Keuntungan penjualan',transactions.filter(t=>t.type==='SALE').reduce((n,t)=>n+Number(t.netProfit||0),0)],['Keuntungan Trade-In',transactions.filter(t=>t.type==='TRADE_IN').reduce((n,t)=>n+Number(t.netProfit||0),0)],['Cash masuk Trade-In (tercatat)',transactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+Math.max(0,t.cashDelta),0)],['Cash keluar Trade-In (tercatat)',transactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+Math.max(0,-t.cashDelta),0)]].map(([label,value])=><div key={label} className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">{label}</p><strong>{formatIDR(value)}</strong></div>)}</div>
+          <div className="space-y-5">
             {/* 4 Compact KPI Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
@@ -1330,7 +1330,7 @@ export default function App() {
                   <span className="text-[11px] font-bold uppercase tracking-wider">Modal</span>
                   <Wallet className="w-4 h-4 text-sky-700" />
                 </div>
-                <p className="text-base sm:text-lg font-black text-slate-900">{formatIDR(analytics.totalModalStok)}</p>
+                <p className="text-base sm:text-lg break-words font-black text-slate-900">{formatIDR(analytics.totalModalStok)}</p>
                 <p className="text-[11px] text-slate-600 mt-0.5">{analytics.inStockCount} kartu aktif</p>
               </div>
 
@@ -1340,7 +1340,7 @@ export default function App() {
                   <span className="text-[11px] font-bold uppercase tracking-wider">Estimasi Nilai Stok</span>
                   <Sparkles className="w-4 h-4 text-amber-800" />
                 </div>
-                <p className="text-base sm:text-lg font-black text-amber-800">{formatIDR(analytics.totalEstimasiJual)}</p>
+                <p className="text-base sm:text-lg break-words font-black text-amber-800">{formatIDR(analytics.totalEstimasiJual)}</p>
                 <p className="text-[11px] text-emerald-700 mt-0.5">
                   Potensi +{formatIDR(analytics.potensiProfitStok)}
                 </p>
@@ -1352,7 +1352,7 @@ export default function App() {
                   <span className="text-[11px] font-bold uppercase tracking-wider">Omzet Penjualan</span>
                   <TrendingUp className="w-4 h-4 text-teal-700" />
                 </div>
-                <p className="text-base sm:text-lg font-black text-slate-900">{formatIDR(analytics.totalOmzet)}</p>
+                <p className="text-base sm:text-lg break-words font-black text-slate-900">{formatIDR(analytics.totalOmzet)}</p>
                 <p className="text-[11px] text-slate-600 mt-0.5">{transactions.length} transaksi tercatat</p>
               </div>
 
@@ -1363,7 +1363,7 @@ export default function App() {
                   <DollarSign className="w-4 h-4 text-emerald-700" />
                 </div>
                 <p
-                  className={`text-base sm:text-lg font-black ${
+                  className={`text-base sm:text-lg break-words font-black ${
                     analytics.totalNetProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                   }`}
                 >
@@ -1374,6 +1374,7 @@ export default function App() {
               </div>
             </div>
 
+            <section className="space-y-2"><h3 className="text-sm font-bold text-slate-700">Rincian keuntungan dan arus kas Trade-In</h3><div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[['Keuntungan penjualan',transactions.filter(t=>t.type==='SALE').reduce((n,t)=>n+Number(t.netProfit||0),0)],['Keuntungan Trade-In',transactions.filter(t=>t.type==='TRADE_IN').reduce((n,t)=>n+Number(t.netProfit||0),0)],['Cash masuk Trade-In (tercatat)',transactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+Math.max(0,t.cashDelta),0)],['Cash keluar Trade-In (tercatat)',transactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+Math.max(0,-t.cashDelta),0)]].map(([label,value])=><div key={label} className="rounded-xl border border-slate-200 bg-white p-4 min-w-0"><p className="text-xs text-slate-500">{label}</p><strong className="block mt-2 text-base sm:text-lg break-words text-slate-800">{formatIDR(value)}</strong></div>)}</div></section>
             {/* BUSINESS FINANCIAL FLOWCHART */}
             <div className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1395,8 +1396,8 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-11 gap-2 items-center pt-1">
-                <div className="lg:col-span-2 p-3 rounded-2xl bg-slate-50 border border-sky-500/35 relative">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch pt-1">
+                <div className="p-4 rounded-2xl bg-slate-50 border border-sky-500/35 relative">
                   <span className="text-[10px] font-extrabold uppercase text-sky-700 block">
                     Total HPP Stok & Kartu Keluar
                   </span>
@@ -1408,11 +1409,11 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-500">
+                <div className="hidden">
                   <ArrowRight className="w-5 h-5 text-emerald-500/70" />
                 </div>
 
-                <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-3">
                   <div className="p-3 rounded-2xl bg-slate-50 border border-amber-500/35">
                     <span className="text-[10px] font-extrabold uppercase text-amber-800 block">
                       Aset di Brankas
@@ -1452,11 +1453,11 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-500">
+                <div className="hidden">
                   <ArrowRight className="w-5 h-5 text-emerald-500/70" />
                 </div>
 
-                <div className="lg:col-span-3 p-3 rounded-2xl bg-slate-50 border border-emerald-500/40 space-y-1.5">
+                <div className="p-4 rounded-2xl bg-slate-50 border border-emerald-500/40 space-y-1.5">
                   <span className="text-[10px] font-extrabold uppercase text-emerald-700 block">
                     Kas Laba & Proyeksi
                   </span>
@@ -1525,7 +1526,7 @@ export default function App() {
 
         {/* ==================== TAB 2: INVENTORY AKTIF ==================== */}
         {activeTab === 'inventory' && <section className="cx-binder-picker" hidden={mobileBinder!==null}>
-          <h3 className="font-bold text-slate-900 mb-2">Pilih lokasi penyimpanan</h3>
+          <h3 className="font-bold text-slate-900 mb-2">Pilih binder</h3>
           <p className="text-xs text-slate-500 mb-3">Buka binder untuk melihat kartu di dalamnya.</p>
           <div className="grid grid-cols-2 gap-2">{['ALL',...storageLocations].map(loc=>{const count=availableInventory.filter(c=>loc==='ALL'||c.storageLocation===loc).length;return <button key={loc} type="button" className="cx-binder-tile" onClick={()=>{setMobileBinder(loc);setFilterStorage(loc);setSearchQuery('');setFilterTcg('ALL');setFilterCategory('ALL');setFilterLanguage('ALL');setFilterGrading('ALL');}}><FolderArchive className="w-5 h-5 text-emerald-700"/><strong>{loc==='ALL'?'Semua kartu':loc}</strong><span>{count} kartu aktif</span></button>})}</div>
         </section>}
@@ -1573,13 +1574,13 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-slate-600">
                     Menampilkan <strong className="text-slate-700">{filteredCards.length}</strong> kartu aktif
-                  </span>
+                  </span><button type="button" onClick={handleExportInventoryExcel} className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800"><FileSpreadsheet className="w-4 h-4"/> Export Excel</button>
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
+              <div className="flex flex-col gap-3">
+                <div className="relative w-full">
+                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
@@ -1626,7 +1627,7 @@ export default function App() {
                     ))}
                   </select>
 
-                  <select aria-label="Asal perolehan" value={originFilter} onChange={e=>setOriginFilter(e.target.value)} className="rounded-xl border border-slate-200 p-2 text-xs"><option value="ALL">Semua asal</option><option value="PURCHASE">Pembelian</option><option value="TRADE_IN">Trade-In</option><option value="UNKNOWN">Data lama</option></select>
+                  <select aria-label="Asal perolehan" value={originFilter} onChange={e=>setOriginFilter(e.target.value)} className="rounded-xl border border-slate-200 p-2 text-xs"><option value="ALL">Semua asal</option><option value="PURCHASE">Pembelian</option><option value="TRADE_IN">Trade-In</option></select>
                   <select
                     value={filterGrading}
                     onChange={(e) => setFilterGrading(e.target.value)}
@@ -1645,7 +1646,7 @@ export default function App() {
                     onChange={(e) => {setFilterStorage(e.target.value);if(mobileBinder!==null)setMobileBinder(e.target.value);}}
                     className="px-2.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="ALL">Semua Penyimpanan</option>
+                    <option value="ALL">Semua Binder</option>
                     {storageLocations.map((loc) => (
                       <option key={loc} value={loc}>
                         {loc}
@@ -1820,7 +1821,7 @@ export default function App() {
                   </p>
                 </div>
                 <div className="relative w-full sm:w-72">
-                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={soldSearchQuery}
@@ -1968,7 +1969,7 @@ export default function App() {
               </div>
 
               <div className="relative">
-                <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   value={posSearchQuery}
@@ -2128,7 +2129,7 @@ export default function App() {
                 </div>
 
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-3.5 h-3.5 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={tradeOutSearch}
@@ -2187,7 +2188,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleAddTradeInRow}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-bold text-emerald-700 flex items-center gap-1"
+                    className="px-3 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold inline-flex items-center gap-2 shrink-0"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Tambah Kartu Masuk</span>
@@ -2325,7 +2326,7 @@ export default function App() {
                       </div>
 
                       <input aria-label="Nama set" placeholder="Nama set / ekspansi" value={item.setName} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,setName:e.target.value}:row))} className="w-full px-2 py-2 rounded-lg bg-white border border-slate-200 text-xs"/>
-                      <div className="flex flex-wrap items-center gap-2"><label className="text-xs font-bold">Foto kartu<input type="file" accept="image/*" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="block w-full text-xs"/></label><label className="text-xs font-bold">Kamera<input type="file" accept="image/*" capture="environment" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="block w-full text-xs"/></label>{item.imageUrl && <><img src={item.imageUrl} alt="Foto kartu masuk" className="h-20 object-contain"/><button type="button" onClick={()=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,imageUrl:''}:row))}>Hapus foto</button></>}</div>
+                      <div className="flex flex-wrap items-center gap-2"><label className="relative cursor-pointer inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-800 focus-within:ring-2 focus-within:ring-emerald-600"><Camera className="w-4 h-4"/> Foto langsung<input type="file" accept="image/*" capture="environment" aria-label="Ambil foto kartu masuk" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="absolute inset-0 opacity-0 cursor-pointer w-full"/></label><label className="relative cursor-pointer inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 focus-within:ring-2 focus-within:ring-emerald-600"><ImageIcon className="w-4 h-4"/> Galeri<input type="file" accept="image/*" aria-label="Pilih foto kartu masuk" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="absolute inset-0 opacity-0 cursor-pointer w-full"/></label>{item.imageUrl && <div className="w-full flex items-center gap-3 rounded-xl bg-white p-2"><img src={item.imageUrl} alt="Foto kartu masuk" className="h-20 object-contain"/><button type="button" className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" onClick={()=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,imageUrl:''}:row))}>Hapus foto</button></div>}</div>
                       <div className="rounded-xl bg-white border border-slate-200 p-3 space-y-3">
                         <label className="block text-xs font-semibold text-slate-700">Target harga jual
                           <input aria-label="Target harga jual" type="text" inputMode="numeric" value={item.targetSellPrice} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,targetSellPrice:formatDotInput(e.target.value)}:row))} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-emerald-700"/>
@@ -2338,24 +2339,15 @@ export default function App() {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-3 w-full"><h3 className="font-bold">Ringkasan kesepakatan</h3><div className="rounded-xl bg-slate-50 p-3"><p className="text-sm">{tradeSummary.cashDelta>0?'Customer Nambah':tradeSummary.cashDelta<0?'Toko Nambah':'Tukar Guling'}</p><strong className="text-xl">{formatIDR(Math.abs(tradeSummary.cashDelta))}</strong></div>{[['Modal awal keluar',tradeSummary.totalOutCost],['Target awal keluar',tradeSummary.totalOutTarget],['Deal keluar',tradeSummary.totalOutDeal],['Modal stok masuk',tradeSummary.totalInValuation],['Keuntungan Trade-In',tradeSummary.tradeNetProfitImpact],['Potensi keuntungan stok masuk',tradeSummary.potential],['Total proyeksi keuntungan',tradeSummary.tradeNetProfitImpact+tradeSummary.potential]].map(([label,value])=><div key={label} className="flex justify-between gap-2 text-sm"><span>{label}</span><strong>{formatIDR(value)}</strong></div>)}</div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={tradeNotes}
-                  onChange={(e) => setTradeNotes(e.target.value)}
-                  placeholder="Catatan trade-in (opsional)..."
-                  className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 hover:from-amber-300 hover:to-emerald-300 text-slate-950 text-xs sm:text-sm font-extrabold shrink-0 shadow-sm"
-                >
-                  Proses Tukar Tambah
-                </button>
+            <section className="rounded-2xl bg-white border border-slate-200 p-4 sm:p-6 space-y-4">
+              <h3 className="text-base font-bold text-slate-900">Ringkasan kesepakatan</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3 min-w-0"><h4 className="font-bold text-sm text-slate-700">Nilai pertukaran</h4>{[['Modal awal keluar',tradeSummary.totalOutCost],['Target awal keluar',tradeSummary.totalOutTarget],['Deal keluar',tradeSummary.totalOutDeal],['Modal stok masuk',tradeSummary.totalInValuation]].map(([label,value])=><div key={label} className="flex flex-wrap justify-between gap-1 text-sm"><span className="text-slate-600">{label}</span><strong>{formatIDR(value)}</strong></div>)}</div>
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3 min-w-0"><h4 className="font-bold text-sm text-slate-700">Keuntungan</h4>{[['Keuntungan Trade-In',tradeSummary.tradeNetProfitImpact],['Potensi keuntungan stok masuk',tradeSummary.potential]].map(([label,value])=><div key={label} className="flex flex-wrap justify-between gap-1 text-sm"><span className="text-slate-600">{label}</span><strong className={value<0?'text-rose-700':'text-emerald-700'}>{formatIDR(value)}</strong></div>)}<div className="border-t border-slate-200 pt-3"><p className="text-xs text-slate-600">Total proyeksi keuntungan</p><strong className="text-lg break-words">{formatIDR(tradeSummary.tradeNetProfitImpact+tradeSummary.potential)}</strong></div></div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 min-w-0 flex flex-col justify-center"><p className="text-xs text-slate-600">Selisih cash</p><h4 className="mt-2 font-bold text-sm">{tradeSummary.cashDelta>0?'Customer Nambah':tradeSummary.cashDelta<0?'Toko Nambah':'Tukar Guling'}</h4><strong className={`text-2xl break-words ${tradeSummary.cashDelta<0?'text-rose-700':'text-emerald-800'}`}>{formatIDR(Math.abs(tradeSummary.cashDelta))}</strong></div>
               </div>
-            </div>
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-end border-t border-slate-200 pt-4"><label className="flex-1 min-w-0 text-xs font-semibold text-slate-700">Catatan (opsional)<input type="text" value={tradeNotes} onChange={e=>setTradeNotes(e.target.value)} className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"/></label><button type="submit" className="rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-3 font-bold text-sm shrink-0">Proses Tukar Tambah</button></div>
+            </section>
           </form>
         )}
 
@@ -2367,7 +2359,7 @@ export default function App() {
             <div className="rounded-2xl bg-white border border-slate-200 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap flex-1 items-center gap-2">
                 <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={historySearch}
@@ -2652,7 +2644,7 @@ export default function App() {
             className="cx-card-form w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white border border-slate-200 shadow-xl p-4 sm:p-6 space-y-4"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base sm:text-lg font-black text-slate-900">
+              <h2 className="text-base sm:text-lg break-words font-black text-slate-900">
                 {editingCard ? 'Edit Data Kartu TCG' : 'Tambah Kartu Baru ke Inventory'}
               </h2>
               <button
