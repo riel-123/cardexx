@@ -395,8 +395,8 @@ export default function App() {
   const [posNotes, setPosNotes] = useState('');
 
   // Trade-In State
-  const [tradeCashFlowType, setTradeCashFlowType] = useState('STORE_RECEIVES');
-  const [tradeCashAmount, setTradeCashAmount] = useState('');
+  const [outDeals, setOutDeals] = useState({});
+  const [originFilter, setOriginFilter] = useState('ALL');
   const [tradeOutSearch, setTradeOutSearch] = useState('');
   const [tradeOutCardIds, setTradeOutCardIds] = useState([]);
   const [tradeNotes, setTradeNotes] = useState('');
@@ -412,7 +412,7 @@ export default function App() {
       gradingCompany: 'Raw',
       grade: 'Raw NM/M',
       storageLocation: 'Binder 1 - High End',
-      costPercent: '70',
+      dealPrice: '',
       targetSellPrice: '',
       imageUrl: ''
     }
@@ -536,7 +536,7 @@ export default function App() {
     const totalEstimasiJual = inStock.reduce((acc, c) => acc + (Number(c.targetPrice) || 0), 0);
     const potensiProfitStok = totalEstimasiJual - totalModalStok;
 
-    const totalOmzet = transactions.reduce((acc, t) => acc + (Number(t.revenue) || 0), 0);
+    const totalOmzet = transactions.filter(t=>t.type==='SALE').reduce((acc, t) => acc + (Number(t.revenue) || 0), 0);
     const totalCostSold = transactions.filter(t=>t.type!=='PURCHASE').reduce((acc, t) => acc + (Number(t.costBasis) || 0), 0);
     const totalNetProfit = transactions.reduce((acc, t) => acc + (Number(t.netProfit) || 0), 0);
     const totalModalKeseluruhan = totalModalStok + totalCostSold;
@@ -588,6 +588,7 @@ export default function App() {
       if (filterLanguage !== 'ALL' && c.language !== filterLanguage) return false;
       const co = c.gradingCompany || getGradingCompany(c.grade);
       if (filterGrading !== 'ALL' && co !== filterGrading) return false;
+      if (originFilter !== 'ALL' && (c.acquisitionSource||'UNKNOWN') !== originFilter) return false;
       if (filterStorage !== 'ALL' && c.storageLocation !== filterStorage) return false;
 
       if (searchQuery.trim()) {
@@ -597,18 +598,18 @@ export default function App() {
       }
       return true;
     });
-  }, [cards, filterTcg, filterCategory, filterLanguage, filterGrading, filterStorage, searchQuery]);
+  }, [cards, filterTcg, filterCategory, filterLanguage, filterGrading, filterStorage, searchQuery, originFilter]);
 
   const soldCards = useMemo(() => {
     return cards.filter((c) => {
-      if (c.status !== 'SOLD') return false;
+      if (c.status !== (activeTab==='traded'?'TRADED':'SOLD')) return false;
       const cardTcg = c.tcg || 'POKEMON';
       if (soldFilterTcg !== 'ALL' && cardTcg !== soldFilterTcg) return false;
       if (!soldSearchQuery.trim()) return true;
       const q = soldSearchQuery.toLowerCase();
       return `${c.name} ${c.setName} ${c.number} ${c.grade} ${c.language} ${cardTcg}`.toLowerCase().includes(q);
     });
-  }, [cards, soldSearchQuery, soldFilterTcg]);
+  }, [cards, soldSearchQuery, soldFilterTcg, activeTab]);
 
   const availableInventory = useMemo(
     () => cards.filter((c) => c.status === 'IN_STOCK'),
@@ -652,30 +653,13 @@ export default function App() {
     const totalOutCost = outCards.reduce((sum, c) => sum + (Number(c.buyPrice) || 0), 0);
 
     const validInItems = tradeInItems.filter((item) => item.name.trim());
-    const totalInValuation = validInItems.reduce(
-      (sum, item) => sum + Math.round(parseDotNumber(item.targetSellPrice) * Number(item.costPercent ?? 70) / 100),
-      0
-    );
-
-    const rawCash = tradeCashFlowType === 'EVEN' ? 0 : parseDotNumber(tradeCashAmount);
-    const cashDelta =
-      tradeCashFlowType === 'STORE_RECEIVES'
-        ? rawCash
-        : tradeCashFlowType === 'STORE_PAYS'
-        ? -rawCash
-        : 0;
-
-    const tradeNetProfitImpact = totalInValuation + cashDelta - totalOutCost;
-    return {
-      outCards,
-      validInItems,
-      totalOutCost,
-      totalOutTarget,
-      totalInValuation,
-      cashDelta,
-      tradeNetProfitImpact
-    };
-  }, [availableInventory, tradeOutCardIds, tradeInItems, tradeCashFlowType, tradeCashAmount]);
+    const totalInValuation = validInItems.reduce((sum,item)=>sum+parseDotNumber(item.dealPrice),0);
+    const totalOutDeal = outCards.reduce((sum,c)=>sum+parseDotNumber(outDeals[c.id] ?? ''),0);
+    const cashDelta = totalOutDeal-totalInValuation;
+    const tradeNetProfitImpact = totalOutDeal-totalOutCost;
+    const potential = validInItems.reduce((sum,item)=>sum+parseDotNumber(item.targetSellPrice)-parseDotNumber(item.dealPrice),0);
+    return {outCards,validInItems,totalOutCost,totalOutTarget,totalInValuation,totalOutDeal,cashDelta,tradeNetProfitImpact,potential};
+  }, [availableInventory,tradeOutCardIds,tradeInItems,outDeals]);
 
   const availableMonths = useMemo(() => {
     const monthSet = new Set();
@@ -824,7 +808,7 @@ export default function App() {
       id: `TRX-${Date.now().toString().slice(-5)}`,
       type: 'SALE',
       tcg: selectedPosCard.tcg || 'POKEMON',
-      date: new Date().toISOString().slice(0, 10),
+      date: new Date().toLocaleDateString('sv-SE', {timeZone:'Asia/Jakarta'}),
       summary: `${selectedPosCard.name} (${selectedPosCard.language} • ${selectedPosCard.grade})`,
       revenue: deal,
       costBasis: cost,
@@ -867,7 +851,7 @@ export default function App() {
         gradingCompany: 'Raw',
         grade: 'Raw NM/M',
         storageLocation: storageLocations[0] || 'Binder 1 - High End',
-        costPercent: '70',
+        dealPrice: '',
         targetSellPrice: '',
         imageUrl: ''
       }
@@ -884,15 +868,15 @@ export default function App() {
       const { outCards, validInItems, totalOutCost, totalInValuation, cashDelta, tradeNetProfitImpact } =
         tradeSummary;
 
-      if (outCards.length === 0 && validInItems.length === 0) {
-        showToast('Pilih minimal 1 kartu keluar atau isi 1 kartu masuk.', 'error');
+      if (outCards.length === 0 || validInItems.length === 0) {
+        showToast('Pilih minimal satu kartu keluar dan satu kartu masuk.', 'error');
         return;
       }
 
       if (validInItems.some(item => !categories.includes(item.category) || !storageLocations.includes(item.storageLocation))) { showToast('Pilih kategori dan lokasi penyimpanan aktif untuk setiap kartu masuk.', 'error'); return; }
-      if (validInItems.some(item => parseDotNumber(item.targetSellPrice) <= 0 || !Number.isFinite(Number(item.costPercent)) || Number(item.costPercent) < 0 || Number(item.costPercent) > 100 || item.costPercent === '')) { showToast('Isi target jual dan persentase modal 0–100% untuk setiap kartu masuk.', 'error'); return; }
+      if (outCards.some(c=>parseDotNumber(outDeals[c.id])<=0) || validInItems.some(item=>parseDotNumber(item.targetSellPrice)<=0 || parseDotNumber(item.dealPrice)<=0) || tradeInItems.some(item=>!item.name.trim() && (item.targetSellPrice || item.dealPrice))) { showToast('Lengkapi nama dan harga deal setiap kartu serta target jual kartu masuk.', 'error'); return; }
       const newCardsFromTrade = validInItems.map((item, idx) => {
-        const valCost = Math.round(parseDotNumber(item.targetSellPrice) * Number(item.costPercent ?? 70) / 100);
+        const valCost = parseDotNumber(item.dealPrice);
         const targetSell = parseDotNumber(item.targetSellPrice);
         return {
           id: `CRD-${Date.now().toString().slice(-4)}${idx}`,
@@ -923,7 +907,7 @@ export default function App() {
         allTcgSet.size > 1 ? 'MIXED' : Array.from(allTcgSet)[0] || 'POKEMON';
       const cashNote =
         cashDelta > 0
-          ? `Toko Terima Cash ${formatIDR(cashDelta)}`
+          ? `Customer Nambah Cash ${formatIDR(cashDelta)}`
           : cashDelta < 0
           ? `Toko Nambah Cash ${formatIDR(Math.abs(cashDelta))}`
           : 'Tukar Guling (0 Cash)';
@@ -932,10 +916,10 @@ export default function App() {
         id: `TRD-${Date.now().toString().slice(-5)}`,
         type: 'TRADE_IN',
         tcg: resolvedTradeTcg,
-        date: new Date().toISOString().slice(0, 10),
+        date: new Date().toLocaleDateString('sv-SE', {timeZone:'Asia/Jakarta'}),
         summary: `Keluar: [${outNames}] ⇄ Masuk: [${inNames}]`,
-        revenue: totalInValuation + (cashDelta > 0 ? cashDelta : 0),
-        costBasis: totalOutCost + (cashDelta < 0 ? Math.abs(cashDelta) : 0),
+        revenue: tradeSummary.totalOutDeal,
+        costBasis: totalOutCost,
         netProfit: tradeNetProfitImpact,
         notes: [cashNote, tradeNotes.trim()].filter(Boolean).join(' • ')
       };
@@ -948,13 +932,13 @@ export default function App() {
           card.imageUrl = await uploadPhoto(card.imageUrl);
           incoming.push(card);
         }
-        const result = await api('/transactions/commit', 'POST', { outgoing: outCards.map(c => ({id:c.id,soldPrice:c.buyPrice})), incoming, transaction });
+        const result = await api('/transactions/commit', 'POST', { outgoing: outCards.map(c => ({id:c.id,soldPrice:parseDotNumber(outDeals[c.id])})), incoming, transaction });
         setCards(prev => [...result.created, ...prev.map(c => result.updated.find(x => x.id === c.id) || c)]);
         setTransactions(prev => [result.transaction, ...prev]);
       });
       if (!ok) return;
       setTradeOutCardIds([]);
-      setTradeCashAmount('');
+      setOutDeals({});
       setTradeNotes('');
       setTradeInItems([
         {
@@ -968,7 +952,7 @@ export default function App() {
           gradingCompany: 'Raw',
           grade: 'Raw NM/M',
           storageLocation: storageLocations[0] || 'Binder 1 - High End',
-          costPercent: '70',
+          dealPrice: '',
           targetSellPrice: '',
           imageUrl: ''
         }
@@ -1101,10 +1085,11 @@ export default function App() {
         'TCG',
         'Tanggal',
         'Ringkasan Item',
-        'Omzet / Nilai (IDR)',
+        'Nilai Transaksi (IDR)',
         'Modal HPP (IDR)',
         'Pembelian (IDR)',
         'Profit Bersih (IDR)',
+        'Cash Trade-In Bersih (IDR)',
         'Catatan'
       ];
       const rows = exportTransactions.map((t) => [
@@ -1117,6 +1102,7 @@ export default function App() {
         t.type === 'PURCHASE' ? 0 : Number(t.costBasis) || 0,
         t.type === 'PURCHASE' ? Number(t.costBasis) || 0 : 0,
         Number(t.netProfit) || 0,
+        t.type==='TRADE_IN' && t.cashDelta!=null ? t.cashDelta : '',
         t.notes || '-'
       ]);
 
@@ -1143,6 +1129,7 @@ export default function App() {
           totalModalFiltered,
           exportTransactions.filter(t=>t.type==='PURCHASE').reduce((n,t)=>n+Number(t.costBasis||0),0),
           totalProfitFiltered,
+          exportTransactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+t.cashDelta,0),
           ''
         ]
       });
@@ -1309,7 +1296,7 @@ export default function App() {
             {id:'settings',label:'Kelola',icon:Tags}
           ].map(({id,label,icon:Icon}) => {
             if (id === 'add-card') return <button key={id} type="button" className="cx-nav-add" aria-label="Tambah kartu" title="Tambah kartu" onClick={handleOpenAddCard}><Icon aria-hidden="true" /></button>;
-            const active = id === 'history' ? ['history','sold','binders'].includes(activeTab) : activeTab === id;
+            const active = id === 'history' ? ['history','sold','traded','binders'].includes(activeTab) : activeTab === id;
             return <button key={id} type="button" aria-current={active?'page':undefined} className={active?'cx-current':''} onClick={()=>{if(id==='inventory' && activeTab!==id && window.matchMedia('(max-width:639px)').matches){setMobileBinder(null);setFilterStorage('ALL');}setActiveTab(id);}}><Icon className="w-5 h-5"/><span>{label}</span></button>;
           })}
         </nav>
@@ -1318,13 +1305,13 @@ export default function App() {
       {/* Main Content Container */}
       <main className="cx-main relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
         {masterError && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Mode baca saja — daftar binder dan kategori belum dapat dimuat.</strong><p className="my-2">{masterError}. Stok dan laporan tetap dapat dilihat. Penyimpanan perubahan dinonaktifkan sementara.</p><button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-white" onClick={loadData}>Coba sambungkan ulang</button></div>}
-        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan binder.'}[activeTab]}</p></div>
-        {['history','sold','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button></nav>}
+        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',traded:'Kartu ditukar',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',traded:'Arsip kartu keluar melalui Trade-In.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan binder.'}[activeTab]}</p></div>
+        {['history','sold','traded','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button><button type="button" className={activeTab==='traded'?'cx-current':''} onClick={()=>setActiveTab('traded')}>Kartu ditukar ({cards.filter(c=>c.status==='TRADED').length})</button></nav>}
         {activeTab==='binders' && <section className="space-y-3">
           <select aria-label="Pilih lokasi laporan" value={binderFilter} onChange={e=>setBinderFilter(e.target.value)} className="w-full sm:w-72 px-3 py-2 rounded-xl border border-slate-200 bg-white"><option value="ALL">Semua lokasi</option>{[...new Set([...storageLocations,...cards.map(c=>c.storageLocation||'Tanpa lokasi')])].map(loc=><option key={loc}>{loc}</option>)}</select>
           <p className="text-xs text-slate-500">Laporan berdasarkan lokasi kartu yang tercatat saat ini. Nilai keluar mencakup SOLD dan trade-in; bukan omzet kas atau laba transaksi final.</p>
           {[...new Set([...storageLocations,...cards.map(c=>c.storageLocation||'Tanpa lokasi')])].filter(loc=>binderFilter==='ALL'||loc===binderFilter).map(loc=>{
-            const all=cards.filter(c=>(c.storageLocation||'Tanpa lokasi')===loc), active=all.filter(c=>c.status==='IN_STOCK'), sold=all.filter(c=>c.status==='SOLD');
+            const all=cards.filter(c=>(c.storageLocation||'Tanpa lokasi')===loc), active=all.filter(c=>c.status==='IN_STOCK'), sold=all.filter(c=>['SOLD','TRADED'].includes(c.status));
             const total=(items,key)=>items.reduce((n,c)=>n+(Number(c[key])||0),0);
             const cost=total(active,'buyPrice'), target=total(active,'targetPrice'), out=total(sold,'soldPrice'), outCost=total(sold,'buyPrice');
             return <article key={loc} className="rounded-2xl bg-white border border-slate-200 p-4"><div className="flex justify-between gap-2 items-center mb-3"><h3 className="font-bold text-slate-900">{loc}</h3><span className="text-xs text-slate-500">{active.length} aktif · {sold.length} keluar</span></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[['Modal stok',cost],['Target jual',target],['Potensi laba',target-cost],['HPP kartu keluar',outCost],['Nilai kartu keluar',out],['Selisih nilai keluar',out-outCost]].map(([label,value])=><div key={label} className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">{label}</div><div className="font-bold text-sm text-emerald-800 break-words">{formatIDR(value)}</div></div>)}</div></article>;
@@ -1334,7 +1321,7 @@ export default function App() {
         {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div></div></section>}
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-4">
+          <div className="space-y-4"><div className="grid grid-cols-2 gap-2">{[['Keuntungan penjualan',transactions.filter(t=>t.type==='SALE').reduce((n,t)=>n+Number(t.netProfit||0),0)],['Keuntungan Trade-In',transactions.filter(t=>t.type==='TRADE_IN').reduce((n,t)=>n+Number(t.netProfit||0),0)],['Cash masuk Trade-In (tercatat)',transactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+Math.max(0,t.cashDelta),0)],['Cash keluar Trade-In (tercatat)',transactions.filter(t=>t.type==='TRADE_IN'&&t.cashDelta!=null).reduce((n,t)=>n+Math.max(0,-t.cashDelta),0)]].map(([label,value])=><div key={label} className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-xs text-slate-500">{label}</p><strong>{formatIDR(value)}</strong></div>)}</div>
             {/* 4 Compact KPI Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
@@ -1362,7 +1349,7 @@ export default function App() {
               <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-teal-400 to-emerald-500" />
                 <div className="flex items-center justify-between text-slate-600 mb-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Omzet Terealisasi</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Omzet Penjualan</span>
                   <TrendingUp className="w-4 h-4 text-teal-700" />
                 </div>
                 <p className="text-base sm:text-lg font-black text-slate-900">{formatIDR(analytics.totalOmzet)}</p>
@@ -1411,13 +1398,13 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-11 gap-2 items-center pt-1">
                 <div className="lg:col-span-2 p-3 rounded-2xl bg-slate-50 border border-sky-500/35 relative">
                   <span className="text-[10px] font-extrabold uppercase text-sky-700 block">
-                    Total Modal Masuk
+                    Total HPP Stok & Kartu Keluar
                   </span>
                   <p className="text-sm font-black text-slate-900 mt-1">
                     {formatIDR(analytics.totalModalKeseluruhan)}
                   </p>
                   <p className="text-[10px] text-slate-600 mt-0.5">
-                    Stok Aktif + Modal Terjual
+                    Akumulasi HPP, bukan setoran kas
                   </p>
                 </div>
 
@@ -1454,7 +1441,7 @@ export default function App() {
                     </p>
                     <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-[10px] text-slate-600 space-y-0.5">
                       <div className="flex justify-between">
-                        <span>Omzet Masuk</span>
+                        <span>Omzet Penjualan</span>
                         <span className="text-emerald-700 font-semibold">{formatIDR(analytics.totalOmzet)}</span>
                       </div>
                       <div className="flex justify-between">
@@ -1639,6 +1626,7 @@ export default function App() {
                     ))}
                   </select>
 
+                  <select aria-label="Asal perolehan" value={originFilter} onChange={e=>setOriginFilter(e.target.value)} className="rounded-xl border border-slate-200 p-2 text-xs"><option value="ALL">Semua asal</option><option value="PURCHASE">Pembelian</option><option value="TRADE_IN">Trade-In</option><option value="UNKNOWN">Data lama</option></select>
                   <select
                     value={filterGrading}
                     onChange={(e) => setFilterGrading(e.target.value)}
@@ -1813,17 +1801,17 @@ export default function App() {
         )}
 
         {/* ==================== TAB 3: ARCHIVE KARTU SOLD ==================== */}
-        {activeTab === 'sold' && (
+        {['sold','traded'].includes(activeTab) && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-white border border-slate-200 p-3.5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                     <Archive className="w-4 h-4 text-amber-800" />
-                    <span>Arsip Kartu Terjual ({soldCards.length})</span>
+                    <span>{activeTab==='traded'?'Arsip Kartu Ditukar':'Arsip Kartu Terjual'} ({soldCards.length})</span>
                   </h2>
                   <p className="text-xs text-slate-600">
-                    Total Profit dari Kartu Terjual:{' '}
+                    {activeTab==='traded'?'Keuntungan pertukaran:':'Keuntungan penjualan:'}{' '}
                     <span className="text-emerald-700 font-bold">
                       {formatIDR(
                         soldCards.reduce((sum, c) => sum + ((c.soldPrice || 0) - (c.buyPrice || 0)), 0)
@@ -1854,7 +1842,7 @@ export default function App() {
                         : 'text-slate-600 hover:text-slate-700'
                     }`}
                   >
-                    Semua TCG ({cards.filter((c) => c.status === 'SOLD').length})
+                    Semua TCG ({cards.filter((c) => c.status === (activeTab==='traded'?'TRADED':'SOLD')).length})
                   </button>
                   <button
                     type="button"
@@ -1865,7 +1853,7 @@ export default function App() {
                         : 'text-slate-600 hover:text-emerald-700'
                     }`}
                   >
-                    Pokémon ({cards.filter((c) => c.status === 'SOLD' && (c.tcg || 'POKEMON') === 'POKEMON').length})
+                    Pokémon ({cards.filter((c) => c.status === (activeTab==='traded'?'TRADED':'SOLD') && (c.tcg || 'POKEMON') === 'POKEMON').length})
                   </button>
                   <button
                     type="button"
@@ -1876,7 +1864,7 @@ export default function App() {
                         : 'text-slate-600 hover:text-rose-700'
                     }`}
                   >
-                    One Piece ({cards.filter((c) => c.status === 'SOLD' && c.tcg === 'ONE_PIECE').length})
+                    One Piece ({cards.filter((c) => c.status === (activeTab==='traded'?'TRADED':'SOLD') && c.tcg === 'ONE_PIECE').length})
                   </button>
                 </div>
               </div>
@@ -1920,7 +1908,7 @@ export default function App() {
                             {card.tcg === 'ONE_PIECE' ? 'OP' : 'PKM'}
                           </span>
                           <span className="px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-[10px] font-extrabold text-rose-700">
-                            SOLD • {card.language}
+                            {card.status} • {card.language}
                           </span>
                         </div>
                         <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-700">
@@ -1942,7 +1930,7 @@ export default function App() {
                             <span className="font-bold text-slate-700">{formatIDR(card.buyPrice)}</span>
                           </div>
                           <div className="p-2 rounded-xl bg-slate-50 border border-amber-500/20">
-                            <span className="block text-[10px] text-amber-800">Laku Di</span>
+                            <span className="block text-[10px] text-amber-800">{activeTab==='traded'?'Harga Deal':'Laku Di'}</span>
                             <span className="font-extrabold text-amber-800">{formatIDR(card.soldPrice)}</span>
                           </div>
                         </div>
@@ -2128,49 +2116,6 @@ export default function App() {
         {/* ==================== TAB 5: TUKAR TAMBAH (TRADE-IN) ==================== */}
         {activeTab === 'trade' && (
           <form onSubmit={handleExecuteTradeIn} className="space-y-4">
-            <div className="rounded-2xl bg-white border border-slate-200 p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Skema Selisih Uang Tunai (Cash)
-                </label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { id: 'STORE_RECEIVES', label: '+ Toko Terima' },
-                    { id: 'STORE_PAYS', label: '- Toko Nambah' },
-                    { id: 'EVEN', label: 'Tukar Guling (0)' }
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setTradeCashFlowType(opt.id)}
-                      className={`px-2.5 py-2 rounded-xl text-[11px] font-extrabold border transition ${
-                        tradeCashFlowType === opt.id
-                          ? 'bg-amber-500/20 border-amber-400 text-amber-800'
-                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-700'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Nominal Cash (IDR)
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  disabled={tradeCashFlowType === 'EVEN'}
-                  value={tradeCashFlowType === 'EVEN' ? '0' : tradeCashAmount}
-                  onChange={(e) => setTradeCashAmount(formatDotInput(e.target.value))}
-                  
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm font-extrabold text-amber-800 disabled:opacity-40 focus:outline-none focus:border-amber-400"
-                />
-              </div>
-            </div>
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -2203,7 +2148,7 @@ export default function App() {
                 </div>
 
                 <p className="text-xs text-slate-500">Centang beberapa kartu sekaligus. Pilihan tetap tersimpan saat mencari kartu lain.</p>
-                {tradeSummary.outCards.length>0 && <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 space-y-1"><div className="flex items-center justify-between"><strong className="text-xs text-rose-700">{tradeSummary.outCards.length} kartu dipilih</strong><button type="button" onClick={()=>setTradeOutCardIds([])} className="text-xs text-rose-700">Hapus semua</button></div>{tradeSummary.outCards.map(c=><div key={c.id} className="flex items-center justify-between gap-2 text-xs"><span>{c.name}<small className="block">Target: {formatIDR(c.targetPrice)}</small></span><button type="button" aria-label={`Batalkan ${c.name}`} onClick={()=>toggleTradeOutCard(c.id)}><X className="w-4 h-4"/></button></div>)}</div>}
+                {tradeSummary.outCards.length>0 && <div className="rounded-xl border border-slate-200 p-3 space-y-3"><div className="flex justify-between"><strong>Kartu dipilih ({tradeSummary.outCards.length})</strong><button type="button" onClick={()=>{setTradeOutCardIds([]);setOutDeals({});}}>Hapus semua</button></div>{tradeSummary.outCards.map(c=><div key={c.id} className="rounded-lg bg-slate-50 p-3 space-y-2"><div className="flex justify-between gap-2"><strong>{c.name}</strong><button type="button" aria-label="Batalkan kartu" onClick={()=>toggleTradeOutCard(c.id)}><X className="w-4 h-4"/></button></div><p className="text-xs">Modal: {formatIDR(c.buyPrice)} · Target: {formatIDR(c.targetPrice)}</p><label className="block text-xs font-bold">Harga deal kartu keluar<input inputMode="numeric" value={outDeals[c.id]??''} onChange={e=>setOutDeals(prev=>({...prev,[c.id]:formatDotInput(e.target.value)}))} className="block w-full rounded-lg border border-slate-200 p-2 mt-1"/></label><p className="text-xs">Keuntungan: {formatIDR(parseDotNumber(outDeals[c.id])-c.buyPrice)}</p></div>)}</div>}
                 <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                   {filteredTradeOutInventory.map((card) => {
                     const checked = tradeOutCardIds.includes(card.id);
@@ -2385,11 +2330,7 @@ export default function App() {
                         <label className="block text-xs font-semibold text-slate-700">Target harga jual
                           <input aria-label="Target harga jual" type="text" inputMode="numeric" value={item.targetSellPrice} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,targetSellPrice:formatDotInput(e.target.value)}:row))} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-emerald-700"/>
                         </label>
-                        <label className="block text-xs font-semibold text-slate-700">Persentase modal (%)
-                          <input type="number" min="0" max="100" step="1" value={item.costPercent ?? '70'} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,costPercent:e.target.value}:row))} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"/>
-                        </label>
-                        <div className="flex flex-wrap gap-2">{[50,60,70,80,90,100].map(percent=><button key={percent} type="button" onClick={()=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,costPercent:String(percent)}:row))} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${Number(item.costPercent)===percent?'bg-emerald-100 border-emerald-500 text-emerald-800':'bg-white border-slate-200 text-slate-600'}`}>{percent}%</button>)}</div>
-                        <div className="grid grid-cols-2 gap-2 rounded-lg bg-emerald-50 p-3"><div className="min-w-0"><div className="text-xs text-slate-600">Modal otomatis</div><strong className="text-sm break-words">{formatIDR(Math.round(parseDotNumber(item.targetSellPrice)*Number(item.costPercent ?? 70)/100))}</strong></div><div className="min-w-0"><div className="text-xs text-slate-600">Potensi keuntungan</div><strong className="text-sm text-emerald-800 break-words">{formatIDR(parseDotNumber(item.targetSellPrice)-Math.round(parseDotNumber(item.targetSellPrice)*Number(item.costPercent ?? 70)/100))}</strong></div></div>
+                        <label className="block text-xs font-semibold text-slate-700">Harga deal kartu masuk<input inputMode="numeric" value={item.dealPrice??''} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,dealPrice:formatDotInput(e.target.value)}:row))} className="mt-1 w-full rounded-lg border border-slate-200 p-2"/></label><div className="grid grid-cols-2 gap-2 bg-emerald-50 rounded-lg p-3 text-sm"><div>Modal baru<br/><strong>{formatIDR(parseDotNumber(item.dealPrice))}</strong></div><div>Potensi keuntungan<br/><strong>{formatIDR(parseDotNumber(item.targetSellPrice)-parseDotNumber(item.dealPrice))}</strong></div></div>
                       </div>
                     </div>
                   ))}
@@ -2398,27 +2339,7 @@ export default function App() {
             </div>
 
             <div className="rounded-2xl bg-white border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-slate-600">
-                  Valuasi Kartu Masuk:{' '}
-                  <span className="font-bold text-emerald-700">{formatIDR(tradeSummary.totalInValuation)}</span> •
-                  Modal Kartu Keluar:{' '}
-                  <span className="font-bold text-rose-700">{formatIDR(tradeSummary.totalOutCost)}</span>
-                </p>
-                <div className="text-xs space-y-1 border-t border-slate-200 pt-2"><p>Total target kartu keluar: <strong>{formatIDR(tradeSummary.totalOutTarget)}</strong></p><p>Potensi laba jika dijual sesuai target: <strong>{formatIDR(tradeSummary.totalOutTarget-tradeSummary.totalOutCost)}</strong></p><p>Nilai tukar efektif (valuasi masuk + kas bersih): <strong>{formatIDR(tradeSummary.totalInValuation+tradeSummary.cashDelta)}</strong></p><p>Selisih terhadap target jual: <strong>{formatIDR(tradeSummary.totalInValuation+tradeSummary.cashDelta-tradeSummary.totalOutTarget)}</strong></p></div>
-                <p className="text-xs sm:text-sm font-extrabold text-slate-900">
-                  Dampak Laba Bersih Trade-In:{' '}
-                  <span
-                    className={
-                      tradeSummary.tradeNetProfitImpact >= 0 ? 'text-emerald-700' : 'text-rose-700'
-                    }
-                  >
-                    {tradeSummary.tradeNetProfitImpact >= 0 ? '+' : ''}
-                    {formatIDR(tradeSummary.tradeNetProfitImpact)}
-                  </span>
-                </p>
-              </div>
-
+              <div className="space-y-3 w-full"><h3 className="font-bold">Ringkasan kesepakatan</h3><div className="rounded-xl bg-slate-50 p-3"><p className="text-sm">{tradeSummary.cashDelta>0?'Customer Nambah':tradeSummary.cashDelta<0?'Toko Nambah':'Tukar Guling'}</p><strong className="text-xl">{formatIDR(Math.abs(tradeSummary.cashDelta))}</strong></div>{[['Modal awal keluar',tradeSummary.totalOutCost],['Target awal keluar',tradeSummary.totalOutTarget],['Deal keluar',tradeSummary.totalOutDeal],['Modal stok masuk',tradeSummary.totalInValuation],['Keuntungan Trade-In',tradeSummary.tradeNetProfitImpact],['Potensi keuntungan stok masuk',tradeSummary.potential],['Total proyeksi keuntungan',tradeSummary.tradeNetProfitImpact+tradeSummary.potential]].map(([label,value])=><div key={label} className="flex justify-between gap-2 text-sm"><span>{label}</span><strong>{formatIDR(value)}</strong></div>)}</div>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -2516,7 +2437,7 @@ export default function App() {
                       <th className="py-2.5 px-3">TCG</th>
                       <th className="py-2.5 px-3">Tipe</th>
                       <th className="py-2.5 px-3">Ringkasan Item</th>
-                      <th className="py-2.5 px-3 text-right">Omzet / Nilai</th>
+                      <th className="py-2.5 px-3 text-right">Nilai Transaksi</th>
                       <th className="py-2.5 px-3 text-right">HPP / Pembelian</th>
                       <th className="py-2.5 px-3 text-right">Profit Bersih</th>
                     </tr>
@@ -2558,7 +2479,7 @@ export default function App() {
                           </td>
                           <td className="py-2.5 px-3">
                             <p className="font-semibold text-slate-700">{trx.summary}</p>
-                            {trx.notes && <p className="text-[10px] text-slate-500">{trx.notes}</p>}
+                            {trx.cashDelta!=null && trx.type==='TRADE_IN' && <p className="text-xs">{trx.cashDelta>0?'Customer Nambah':trx.cashDelta<0?'Toko Nambah':'Tukar Guling'}: {formatIDR(Math.abs(trx.cashDelta))}</p>}{trx.notes && <p className="text-[10px] text-slate-500">{trx.notes}</p>}
                           </td>
                           <td className="py-2.5 px-3 text-right font-bold text-slate-700 whitespace-nowrap">
                             {formatIDR(trx.revenue)}
@@ -2615,7 +2536,7 @@ export default function App() {
                     {selectedDetailCard.storageLocation}
                   </span>
                 </div>
-                <h2 className="text-base sm:text-xl font-black text-slate-900">{selectedDetailCard.name}</h2>
+                <h2 className="text-base sm:text-xl font-black text-slate-900">{selectedDetailCard.name}</h2><p className="text-xs text-slate-600">Asal: {selectedDetailCard.acquisitionSource==='TRADE_IN'?'Trade-In':selectedDetailCard.acquisitionSource==='PURCHASE'?'Pembelian':'Belum tercatat'} · {selectedDetailCard.createdAt?new Date(selectedDetailCard.createdAt).toLocaleDateString('id-ID'):''}</p>{selectedDetailCard.acquisitionTransactionId && <p className="text-xs break-all">Transaksi asal: {selectedDetailCard.acquisitionTransactionId}<br/>{transactions.find(t=>t.id===selectedDetailCard.acquisitionTransactionId)?.summary}</p>}{selectedDetailCard.disposalTransactionId && <p className="text-xs break-all">Transaksi keluar: {selectedDetailCard.disposalTransactionId} · {selectedDetailCard.status} · {formatIDR(selectedDetailCard.soldPrice)}<br/>{transactions.find(t=>t.id===selectedDetailCard.disposalTransactionId)?.summary}<br/>Keuntungan: {formatIDR(Number(selectedDetailCard.soldPrice)-Number(selectedDetailCard.buyPrice))}</p>}
                 <p className="text-xs text-slate-600">
                   {selectedDetailCard.setName ? `${selectedDetailCard.setName} • ` : ''}
                   Nomor: <span className="text-slate-700 font-bold">{selectedDetailCard.number}</span>
