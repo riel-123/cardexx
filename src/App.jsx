@@ -101,8 +101,8 @@ const POKEMON_LANGUAGES = [
 const GRADING_COMPANIES = ['Raw', 'PSA', 'BGS', 'CGC', 'SGC', 'ARS', 'TAG'];
 
 const TCG_GAMES = [
-  { id: 'POKEMON', label: 'Pokémon', badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
-  { id: 'ONE_PIECE', label: 'One Piece', badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30' }
+  { id: 'POKEMON', label: 'Pokémon', badgeClass: 'bg-emerald-500/15 text-emerald-700 border-emerald-500/30' },
+  { id: 'ONE_PIECE', label: 'One Piece', badgeClass: 'bg-rose-500/15 text-rose-700 border-rose-500/30' }
 ];
 
 const getTcgMeta = (tcgId) =>
@@ -243,73 +243,6 @@ const getGradingCompany = (gradeStr) => {
   if (g.includes('ARS')) return 'ARS';
   if (g.includes('TAG')) return 'TAG';
   return 'Raw';
-};
-
-const extractCleanCardName = (rawName) => {
-  if (!rawName) return '';
-  return rawName
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(
-      /\b(ex|gx|vmax|vstar|v-union|v|sar|sr|ur|ar|chr|csr|ssr|hr|rrr|rr|sec|sp|tr|r|uc|c|l|leader|manga\s*rare|manga|alt\s*art|parallel|special\s*art\s*rare|full\s*art|secret\s*rare|promo|holo|reverse)\b/gi,
-      ' '
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-const buildMarketSearchQuery = (card, { includeGrade = true } = {}) => {
-  const cleanName = extractCleanCardName(card?.name || '');
-  const number = (card?.number || '').trim();
-  const baseQuery = [cleanName || card?.name || '', number].filter(Boolean).join(' ').trim();
-
-  if (!includeGrade) return baseQuery;
-
-  const company = card?.gradingCompany || getGradingCompany(card?.grade);
-  const gradeText = (card?.grade || '').trim();
-  if (company === 'Raw' || gradeText.toLowerCase().startsWith('raw')) {
-    return baseQuery;
-  }
-  return [baseQuery, gradeText].filter(Boolean).join(' ').trim();
-};
-
-const getMarketAppLinks = (card) => {
-  const webQuery = buildMarketSearchQuery(card, { includeGrade: true });
-  const appQuery = buildMarketSearchQuery(card, { includeGrade: false });
-  const encodedWeb = encodeURIComponent(webQuery);
-  const encodedApp = encodeURIComponent(appQuery);
-
-  return {
-    webQuery,
-    appQuery,
-    pricecharting: {
-      webUrl: `https://www.pricecharting.com/search-products?q=${encodedWeb}&type=prices`,
-      androidIntent: `intent://www.pricecharting.com/search-products?q=${encodedApp}&type=prices#Intent;scheme=https;package=com.pricecharting.app;S.browser_fallback_url=${encodeURIComponent(
-        `https://www.pricecharting.com/search-products?q=${encodedWeb}&type=prices`
-      )};end`,
-      iosScheme: `pricecharting://search?q=${encodedApp}`
-    },
-    ebay: {
-      webUrl: `https://www.ebay.com/sch/i.html?_nkw=${encodedWeb}&LH_Sold=1&LH_Complete=1`,
-      androidIntent: `intent://www.ebay.com/sch/i.html?_nkw=${encodedApp}&LH_Sold=1&LH_Complete=1#Intent;scheme=https;package=com.ebay.mobile;S.browser_fallback_url=${encodeURIComponent(
-        `https://www.ebay.com/sch/i.html?_nkw=${encodedWeb}&LH_Sold=1&LH_Complete=1`
-      )};end`,
-      iosScheme: `ebay://sch/i.html?_nkw=${encodedApp}&LH_Sold=1&LH_Complete=1`
-    },
-    snkrdunk: {
-      webUrl: `https://snkrdunk.com/en/search/result?keyword=${encodedWeb}`,
-      androidIntent: `intent://snkrdunk.com/en/search/result?keyword=${encodedApp}#Intent;scheme=https;package=jp.co.soda.snkrdunk;S.browser_fallback_url=${encodeURIComponent(
-        `https://snkrdunk.com/en/search/result?keyword=${encodedWeb}`
-      )};end`,
-      iosScheme: `snkrdunk://search?keyword=${encodedApp}`
-    },
-    collectr: {
-      webUrl: `https://app.getcollectr.com/?query=${encodedWeb}`,
-      androidIntent: `intent://app.getcollectr.com/?query=${encodedApp}#Intent;scheme=https;package=com.collectr.app;S.browser_fallback_url=${encodeURIComponent(
-        `https://app.getcollectr.com/?query=${encodedWeb}`
-      )};end`,
-      iosScheme: `collectr://search?query=${encodedApp}`
-    }
-  };
 };
 
 // --- INITIAL DUMMY DATA (POKÉMON & ONE PIECE) ---
@@ -500,14 +433,8 @@ export default function App() {
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [goalInputDraft, setGoalInputDraft] = useState('10.000.000');
 
-  // Batch Market Scan State
-  const [isBatchScanning, setIsBatchScanning] = useState(false);
-
-  // Modals & Market Intel State
   const [selectedDetailCard, setSelectedDetailCard] = useState(null);
-  const [marketCache, setMarketCache] = useState({});
-  const [marketLoadingId, setMarketLoadingId] = useState(null);
-
+  const [showFilters, setShowFilters] = useState(false);
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [editingCard, setEditingCard] = useState(null);
   const [cardForm, setCardForm] = useState({
@@ -547,6 +474,20 @@ export default function App() {
   const [connectionError, setConnectionError] = useState('');
   const [saving, setSaving] = useState(false);
   const lock = useRef(false);
+  const photoBusy = useRef(false);
+  const [processingPhoto, setProcessingPhoto] = useState(false);
+  const uploadPhoto = async (image) => {
+    if (!image?.startsWith('data:')) return image;
+    const base = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+    const response = await fetch(base + '/cards/images', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({image})});
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || `Upload foto gagal (API ${response.status})`);
+    }
+    const result = await response.json();
+    if (!result.url) throw new Error('URL foto tidak diterima');
+    return result.url;
+  };
   const api = async (path, method = 'GET', body) => {
     const base = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
     if (!base) throw new Error('VITE_API_URL belum dikonfigurasi');
@@ -608,70 +549,6 @@ export default function App() {
       };
     });
 
-    const sellRecommendations = inStock
-      .map((card) => {
-        const cached = marketCache[card.id];
-        const buy = Number(card.buyPrice) || 0;
-        const target = Number(card.targetPrice) || 0;
-        const marginPct = buy > 0 ? Math.round(((target - buy) / buy) * 100) : 0;
-
-        const verdictText = (cached?.verdict || '').toLowerCase();
-        const hasLiveDropSignal =
-          verdictText.includes('turun') ||
-          verdictText.includes('koreksi') ||
-          verdictText.includes('di bawah') ||
-          verdictText.includes('lebih rendah');
-
-        const hasLiveSurgeSignal =
-          verdictText.includes('naik') ||
-          verdictText.includes('melonjak') ||
-          verdictText.includes('di atas') ||
-          verdictText.includes('menguat');
-
-        let trendDropPct = 0;
-        let reason = '';
-        let urgency = 'WATCH';
-
-        if (hasLiveDropSignal) {
-          trendDropPct = -12;
-          reason = 'Data pasar terbaru menunjukkan harga listing kompetitor mulai terkoreksi di bawah target.';
-          urgency = 'HIGH';
-        } else if (hasLiveSurgeSignal) {
-          trendDropPct = 14;
-          reason = 'Permintaan pasar sedang menguat! Anda berpeluang menaikkan harga target jual.';
-          urgency = 'SURGE';
-        } else if (marginPct <= 22) {
-          trendDropPct = -8;
-          reason = `Spread margin tipis (+${marginPct}%). Segera lepas agar modal cepat berputar sebelum pasar melemah.`;
-          urgency = 'HIGH';
-        } else if (card.id === 'CRD-104' || card.id === 'CRD-105') {
-          trendDropPct = -6;
-          reason = 'Set terbaru (sv8 / OP-08) rawan koreksi pasca-rilis; amankan profit sebelum suplai bertambah.';
-          urgency = 'MEDIUM';
-        } else {
-          trendDropPct = 4;
-          reason = `Harga relatif stabil dengan proyeksi margin sehat (+${marginPct}%).`;
-          urgency = 'WATCH';
-        }
-
-        const suggestedFastSellPrice =
-          urgency === 'SURGE'
-            ? Math.round((target * 1.1) / 10000) * 10000
-            : Math.round((buy + (target - buy) * 0.65) / 10000) * 10000;
-
-        return {
-          card,
-          marginPct,
-          trendDropPct,
-          reason,
-          urgency,
-          suggestedFastSellPrice,
-          hasLiveCache: Boolean(cached)
-        };
-      })
-      .filter((item) => item.urgency === 'HIGH' || item.urgency === 'MEDIUM' || item.urgency === 'SURGE')
-      .sort((a, b) => a.trendDropPct - b.trendDropPct);
-
     const goalProgressPct =
       monthlyProfitGoal > 0
         ? Math.min(100, Math.max(0, Math.round((totalNetProfit / monthlyProfitGoal) * 100)))
@@ -692,10 +569,9 @@ export default function App() {
       totalNetProfit,
       totalModalKeseluruhan,
       categoryStats,
-      sellRecommendations,
       goalProgressPct
     };
-  }, [cards, transactions, categories, marketCache, monthlyProfitGoal]);
+  }, [cards, transactions, categories, monthlyProfitGoal]);
 
   const filteredCards = useMemo(() => {
     return cards.filter((c) => {
@@ -818,33 +694,6 @@ export default function App() {
     });
   }, [transactions, historySearch, historyTypeFilter, historyTcgFilter, historyMonthFilter]);
 
-  // --- MOBILE DEEP LINK / WEB LAUNCHER ---
-  const handleOpenMarketApp = (e, platform, card) => {
-    const links = getMarketAppLinks(card);
-    const target = links[platform];
-    if (!target) return;
-
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
-    const isAndroid = /Android/i.test(ua);
-    const isIOS = /iPhone|iPad|iPod/i.test(ua);
-
-    if (isAndroid || isIOS) {
-      e.preventDefault();
-      copyToClipboard(
-        links.appQuery,
-        `Kata kunci "${links.appQuery}" disalin — membuka ${platform.toUpperCase()}...`
-      );
-      if (isAndroid) {
-        window.location.href = target.androidIntent;
-      } else {
-        window.location.href = target.iosScheme;
-        setTimeout(() => {
-          window.open(target.webUrl, '_blank', 'noopener,noreferrer');
-        }, 900);
-      }
-    }
-  };
-
   // --- CRUD CARD HANDLERS ---
   const handleOpenAddCard = () => {
     setEditingCard(null);
@@ -891,6 +740,7 @@ export default function App() {
 
   const handleSaveCard = async (e) => {
     e.preventDefault();
+    if (photoBusy.current) { showToast('Foto masih diproses.', 'error'); return; }
     if (!cardForm.name.trim()) {
       showToast('Nama kartu wajib diisi.', 'error');
       return;
@@ -912,6 +762,12 @@ export default function App() {
     };
 
     const ok = await persist(async () => {
+      if (editingCard && payload.imageUrl === (editingCard.imageUrl || '')) {
+        delete payload.imageUrl; // Preserve existing photos, including legacy Base64.
+      } else {
+        payload.imageUrl = await uploadPhoto(payload.imageUrl);
+        setCardForm(prev => ({...prev, imageUrl: payload.imageUrl}));
+      }
       const saved = editingCard ? await api('/cards/' + encodeURIComponent(editingCard.id), 'PATCH', payload) : await api('/cards', 'POST', payload);
       setCards(prev => editingCard ? prev.map(c => c.id === editingCard.id ? saved : c) : [saved, ...prev]);
       showToast('Kartu berhasil disimpan ke database!');
@@ -1066,7 +922,12 @@ export default function App() {
 
       const ok = await persist(async () => {
         const { id, ...transaction } = newTrx;
-        const incoming = newCardsFromTrade.map(({id, ...card}) => card);
+        if (photoBusy.current) throw new Error('Foto masih diproses');
+        const incoming = [];
+        for (const {id, ...card} of newCardsFromTrade) {
+          card.imageUrl = await uploadPhoto(card.imageUrl);
+          incoming.push(card);
+        }
         const result = await api('/transactions/commit', 'POST', { outgoing: outCards.map(c => ({id:c.id,soldPrice:c.buyPrice})), incoming, transaction });
         setCards(prev => [...result.created, ...prev.map(c => result.updated.find(x => x.id === c.id) || c)]);
         setTransactions(prev => [result.transaction, ...prev]);
@@ -1338,323 +1199,160 @@ export default function App() {
   };
 
   // --- IMAGE UPLOAD / CAMERA HANDLER ---
-  const handleImageFileUpload = (e, targetMode = 'CARD_FORM', tradeTempId = null) => {
+  const handleImageFileUpload = async (e, targetMode = 'CARD_FORM', tradeTempId = null) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      showToast('Ukuran foto maksimal 4MB.', 'error');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result;
-      if (targetMode === 'CARD_FORM') {
-        setCardForm((prev) => ({ ...prev, imageUrl: base64 }));
-        showToast('Foto kartu berhasil dimuat!');
-      } else if (targetMode === 'TRADE_IN' && tradeTempId) {
-        setTradeInItems((prev) =>
-          prev.map((row) => (row.tempId === tradeTempId ? { ...row, imageUrl: base64 } : row))
-        );
-        showToast('Foto kartu masuk berhasil dimuat!');
-      }
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
-  };
-
-  // --- REAL-TIME MARKET INTELLIGENCE (eBay Last Sold, PriceCharting, SNKRDUNK, Collectr) ---
-  const fetchMarketIntelligence = async (card, forceRefresh = false) => {
-    if (!card) return;
-    if (!forceRefresh && marketCache[card.id]) return;
-
-    setMarketLoadingId(card.id);
+    if (!file || photoBusy.current) return;
+    if (!file.type.startsWith('image/') || file.size > 25 * 1024 * 1024) { showToast('Pilih gambar maksimal 25 MB.', 'error'); return; }
+    photoBusy.current = true; setProcessingPhoto(true);
+    const objectUrl = URL.createObjectURL(file);
     try {
-      const searchSpec = buildMarketSearchQuery(card, { includeGrade: true });
-      const tcgName = card.tcg === 'ONE_PIECE' ? 'One Piece Card Game' : 'Pokémon TCG';
-      const setContext = card.setName ? `Set: ${card.setName}, ` : '';
-      const prompt = `Cari harga pasar aktual terkini untuk kartu ${tcgName}: "${searchSpec}" (${setContext}Bahasa: ${getLanguageLabel(card.language)}).
-Berikan ringkasan harga nyata dari 4 platform berikut jika ditemukan di hasil pencarian web:
-1. eBay Last Sold (transaksi terjual terbaru)
-2. PriceCharting
-3. SNKRDUNK
-4. Collectr
-
-Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
-{
-  "ebaySold": { "range": "contoh: $180 - $210 (Rp 2,9jt - 3,4jt)", "note": "ringkasan singkat" },
-  "priceCharting": { "range": "contoh: $195.00 (Rp 3,1jt)", "note": "ringkasan singkat" },
-  "snkrdunk": { "range": "contoh: ¥28,500 (Rp 3,0jt)", "note": "ringkasan singkat" },
-  "collectr": { "range": "contoh: $192.50 (Rp 3,1jt)", "note": "ringkasan singkat" },
-  "verdict": "1-2 kalimat analisis posisi harga jual toko (${formatIDR(card.targetPrice)}) dibanding harga pasar saat ini."
-}`;
-
-      const apiKey = '';
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            tools: [{ google_search: {} }]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API status ${response.status}`);
+      const img = new Image();
+      img.src = objectUrl;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      let scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      let encoded = '';
+      for (let i = 0; i < 9; i++) {
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        encoded = canvas.toDataURL('image/jpeg', Math.max(0.55, 0.88 - i * 0.06));
+        if (encoded.length <= 800000 && encoded.startsWith('data:image/jpeg;base64,')) break;
+        scale *= 0.8;
       }
-
-      const data = await response.json();
-      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const groundingChunks = data?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      const sources = groundingChunks
-        .filter((c) => c.web?.uri)
-        .slice(0, 4)
-        .map((c) => ({ title: c.web.title || 'Referensi Web', uri: c.web.uri }));
-
-      const cleanedJson = rawText.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(cleanedJson);
-
-      setMarketCache((prev) => ({
-        ...prev,
-        [card.id]: {
-          ...parsed,
-          sources,
-          updatedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-        }
-      }));
-    } catch (err) {
-      console.error('Market lookup error:', err);
-      setMarketCache((prev) => ({
-        ...prev,
-        [card.id]: {
-          ebaySold: { range: 'Cek langsung via tombol eBay', note: 'Data live membutuhkan koneksi API aktif' },
-          priceCharting: { range: 'Cek langsung via PriceCharting', note: 'Gunakan tombol buka link di atas' },
-          snkrdunk: { range: 'Cek langsung via SNKRDUNK', note: 'Referensi pasar Jepang & Asia' },
-          collectr: { range: 'Cek langsung via Collectr', note: 'Referensi portofolio kolektor' },
-          verdict: `Gunakan 4 tombol cepat di atas untuk mengecek listing real-time "${buildMarketSearchQuery(card, { includeGrade: true })}" langsung di masing-masing platform.`,
-          sources: [],
-          updatedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-        }
-      }));
-    } finally {
-      setMarketLoadingId(null);
-    }
+      if (!encoded.startsWith('data:image/jpeg;base64,') || encoded.length > 800000) throw new Error('Foto tidak dapat dikompres');
+      if (targetMode === 'CARD_FORM') setCardForm(prev => ({...prev, imageUrl:encoded}));
+      else setTradeInItems(prev => prev.map(row => row.tempId === tradeTempId ? {...row,imageUrl:encoded} : row));
+      showToast('Foto siap diunggah saat disimpan.');
+    } catch (error) { showToast('Gagal memproses foto: ' + error.message, 'error'); }
+    finally { URL.revokeObjectURL(objectUrl); photoBusy.current = false; setProcessingPhoto(false); }
   };
 
-  const openCardDetailWithMarketIntel = (card) => {
-    setSelectedDetailCard(card);
-    fetchMarketIntelligence(card, false);
-  };
+  const openCardDetail = (card) => setSelectedDetailCard(card);
 
-  // --- BATCH SCAN ALL ACTIVE INVENTORY MARKET INTEL ---
-  const handleScanAllMarket = async () => {
-    if (isBatchScanning || availableInventory.length === 0) return;
-    setIsBatchScanning(true);
-    showToast(`Memindai harga pasar ${availableInventory.length} kartu aktif...`);
-    try {
-      for (const card of availableInventory) {
-        await fetchMarketIntelligence(card, true);
-      }
-      showToast('Pemindaian pasar seluruh kartu selesai!');
-    } finally {
-      setIsBatchScanning(false);
-    }
-  };
-
-  if (connection !== 'ready') return <div className="min-h-screen bg-slate-950 text-slate-100 p-8"><h1 className="text-xl font-bold text-emerald-300">CARDEXX</h1><p className="my-4">{connection === 'loading' ? 'Memuat data dari database...' : 'Koneksi database gagal: ' + connectionError}</p>{connection === 'error' && <button className="bg-emerald-600 rounded px-4 py-2" onClick={loadData}>Coba lagi</button>}</div>;
+  if (connection !== 'ready') return <div className="min-h-screen bg-slate-50 text-slate-800 p-8"><h1 className="text-xl font-bold text-emerald-700">CARDEXX</h1><p className="my-4">{connection === 'loading' ? 'Memuat data dari database...' : 'Koneksi database gagal: ' + connectionError}</p>{connection === 'error' && <button className="bg-emerald-700 text-white rounded px-4 py-2" onClick={loadData}>Coba lagi</button>}</div>;
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/30 selection:text-emerald-200 relative overflow-x-hidden">
-      {saving && <div className="fixed inset-0 z-[100] bg-slate-950/60 flex items-center justify-center" role="status"><span className="bg-slate-900 p-4 rounded-xl">Menyimpan ke database...</span></div>}
-      {/* Ambient Emerald & Gold Sky Vault Glow */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-32 -left-24 w-96 h-96 rounded-full bg-emerald-500/10 blur-3xl" />
-        <div className="absolute top-20 right-0 w-80 h-80 rounded-full bg-amber-400/10 blur-3xl" />
-      </div>
-
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-emerald-500/30 selection:text-emerald-700 relative overflow-x-hidden">
+      {(saving || processingPhoto) && <div className="fixed inset-0 z-[100] bg-slate-950/50 flex items-center justify-center" role="status"><span className="bg-white p-4 rounded-xl">{processingPhoto ? "Mengompres foto..." : "Menyimpan ke database..."}</span></div>}
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`fixed bottom-5 right-5 z-[90] flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-md text-xs sm:text-sm font-bold transition-all ${
+          className={`fixed bottom-5 right-5 z-[90] flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-xl border backdrop-blur-md text-xs sm:text-sm font-bold transition-all ${
             toast.type === 'error'
-              ? 'bg-rose-950/90 border-rose-500/50 text-rose-200'
-              : 'bg-slate-900/95 border-emerald-500/50 text-emerald-200'
+              ? 'bg-rose-50 border-rose-500/50 text-rose-700'
+              : 'bg-white border-emerald-500/50 text-emerald-700'
           }`}
         >
           {toast.type === 'error' ? (
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
           ) : (
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
           )}
           <span>{toast.message}</span>
         </div>
       )}
 
-      {/* Top Sticky Header */}
-      <header className="sticky top-0 z-40 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
-          {/* Brand Logo */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500/20 via-slate-900 to-amber-500/20 border border-emerald-500/40 flex items-center justify-center shadow-lg shadow-emerald-950/50">
-              <RayquazaLogo className="w-7 h-7" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black tracking-tight bg-gradient-to-r from-emerald-300 via-teal-200 to-amber-300 bg-clip-text text-transparent">
-                  CARDEXX
-                </h1>
-                <span className="px-1.5 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                  MULTI-TCG
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                Pokémon & One Piece TCG Inventory, POS Kasir & Trade-In
-              </p>
-            </div>
-          </div>
-
-          {/* Quick Master Data & Add Card Actions */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCategoryModalOpen(true)}
-              className="px-2.5 sm:px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-slate-200 flex items-center gap-1.5 transition"
-              title="Kelola Kategori Kartu"
-            >
-              <Tags className="w-3.5 h-3.5 text-amber-400" />
-              <span>Kategori</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsStorageModalOpen(true)}
-              className="px-2.5 sm:px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-bold text-slate-200 flex items-center gap-1.5 transition"
-              title="Kelola Lokasi Penyimpanan Fisik"
-            >
-              <FolderArchive className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Penyimpanan</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleOpenAddCard}
-              className="px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition"
-            >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>Tambah Kartu</span>
-            </button>
-          </div>
+      <header className="cx-header">
+        <div className="cx-top">
+          <div className="cx-brand"><RayquazaLogo className="w-9 h-9"/><div><h1>CARDEXX</h1><p>TCG workspace</p></div></div>
+          <button type="button" className="cx-add" onClick={handleOpenAddCard}><Plus className="w-5 h-5"/> <span>Tambah kartu</span></button>
         </div>
-
-        {/* Navigation Pill Bar */}
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 pb-2.5 overflow-x-auto">
-          <nav className="inline-flex items-center gap-1 p-1 rounded-2xl bg-slate-900/90 border border-slate-800/90 min-w-max">
-            {[
-              { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-              { id: 'inventory', label: `Inventory (${analytics.inStockCount})`, icon: Package },
-              { id: 'sold', label: `Sold (${analytics.soldCount})`, icon: Archive },
-              { id: 'pos', label: 'Kasir / Jual', icon: ShoppingBag },
-              { id: 'trade', label: 'Tukar Tambah', icon: ArrowLeftRight },
-              { id: 'history', label: 'Riwayat & Laba', icon: History }
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                    active
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+        <nav className="cx-nav" aria-label="Navigasi utama">
+          {[
+            {id:'dashboard',label:'Beranda',icon:LayoutDashboard},
+            {id:'inventory',label:'Stok',icon:Package},
+            {id:'pos',label:'Kasir',icon:ShoppingBag},
+            {id:'trade',label:'Trade-in',icon:ArrowLeftRight},
+            {id:'history',label:'Laporan',icon:BarChart3},
+            {id:'settings',label:'Kelola',icon:Tags}
+          ].map(({id,label,icon:Icon}) => {
+            const active = id === 'history' ? ['history','sold'].includes(activeTab) : activeTab === id;
+            return <button key={id} type="button" aria-current={active?'page':undefined} className={active?'cx-current':''} onClick={()=>setActiveTab(id)}><Icon className="w-5 h-5"/><span>{label}</span></button>;
+          })}
+        </nav>
       </header>
 
       {/* Main Content Container */}
-      <main className="relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
+      <main className="cx-main relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
+        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',settings:'Atur kategori dan lokasi penyimpanan.'}[activeTab]}</p></div>
+        {['history','sold'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat & laba</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button></nav>}
+        {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Penyimpanan <span>{storageLocations.length}</span></button></div>}
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-4">
             {/* 4 Compact KPI Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 relative overflow-hidden">
+              <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-sky-400 to-blue-500" />
-                <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <div className="flex items-center justify-between text-slate-600 mb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider">Modal Tertahan</span>
-                  <Wallet className="w-4 h-4 text-sky-400" />
+                  <Wallet className="w-4 h-4 text-sky-700" />
                 </div>
-                <p className="text-base sm:text-lg font-black text-white">{formatIDR(analytics.totalModalStok)}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{analytics.inStockCount} kartu aktif</p>
+                <p className="text-base sm:text-lg font-black text-slate-900">{formatIDR(analytics.totalModalStok)}</p>
+                <p className="text-[11px] text-slate-600 mt-0.5">{analytics.inStockCount} kartu aktif</p>
               </div>
 
-              <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 relative overflow-hidden">
+              <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-amber-400 to-orange-500" />
-                <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <div className="flex items-center justify-between text-slate-600 mb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider">Estimasi Nilai Stok</span>
-                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <Sparkles className="w-4 h-4 text-amber-800" />
                 </div>
-                <p className="text-base sm:text-lg font-black text-amber-300">{formatIDR(analytics.totalEstimasiJual)}</p>
-                <p className="text-[11px] text-emerald-400 mt-0.5">
+                <p className="text-base sm:text-lg font-black text-amber-800">{formatIDR(analytics.totalEstimasiJual)}</p>
+                <p className="text-[11px] text-emerald-700 mt-0.5">
                   Potensi +{formatIDR(analytics.potensiProfitStok)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 relative overflow-hidden">
+              <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-teal-400 to-emerald-500" />
-                <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <div className="flex items-center justify-between text-slate-600 mb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider">Omzet Terealisasi</span>
-                  <TrendingUp className="w-4 h-4 text-teal-400" />
+                  <TrendingUp className="w-4 h-4 text-teal-700" />
                 </div>
-                <p className="text-base sm:text-lg font-black text-white">{formatIDR(analytics.totalOmzet)}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{transactions.length} transaksi tercatat</p>
+                <p className="text-base sm:text-lg font-black text-slate-900">{formatIDR(analytics.totalOmzet)}</p>
+                <p className="text-[11px] text-slate-600 mt-0.5">{transactions.length} transaksi tercatat</p>
               </div>
 
-              <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 relative overflow-hidden">
+              <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-emerald-400 to-lime-400" />
-                <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <div className="flex items-center justify-between text-slate-600 mb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider">Laba Bersih Aktual</span>
-                  <DollarSign className="w-4 h-4 text-emerald-400" />
+                  <DollarSign className="w-4 h-4 text-emerald-700" />
                 </div>
                 <p
                   className={`text-base sm:text-lg font-black ${
-                    analytics.totalNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    analytics.totalNetProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                   }`}
                 >
                   {analytics.totalNetProfit >= 0 ? '+' : ''}
                   {formatIDR(analytics.totalNetProfit)}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Selisih harga laku - modal</p>
+                <p className="text-[11px] text-slate-600 mt-0.5">Selisih harga laku - modal</p>
               </div>
             </div>
 
             {/* MONTHLY PROFIT GOAL TRACKER */}
-            <div className="rounded-2xl bg-slate-900/85 border border-emerald-500/25 p-4 space-y-2.5">
+            <div className="rounded-2xl bg-white border border-emerald-500/25 p-4 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
-                    <Target className="w-4 h-4 text-emerald-400" />
+                    <Target className="w-4 h-4 text-emerald-700" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-white">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
                       Target Profit Bulanan (Monthly Goal Tracker)
                     </h3>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-slate-600">
                       Tercapai{' '}
-                      <span className="text-emerald-300 font-bold">
+                      <span className="text-emerald-700 font-bold">
                         {formatIDR(Math.max(0, analytics.totalNetProfit))}
                       </span>{' '}
                       dari target{' '}
-                      <span className="text-amber-300 font-bold">{formatIDR(monthlyProfitGoal)}</span>
+                      <span className="text-amber-800 font-bold">{formatIDR(monthlyProfitGoal)}</span>
                     </p>
                   </div>
                 </div>
@@ -1666,7 +1364,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       inputMode="numeric"
                       value={goalInputDraft}
                       onChange={(e) => setGoalInputDraft(formatDotInput(e.target.value))}
-                      className="w-32 px-2.5 py-1.5 rounded-xl bg-slate-950 border border-emerald-500 text-xs font-extrabold text-amber-300 focus:outline-none"
+                      className="w-32 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-emerald-500 text-xs font-extrabold text-amber-800 focus:outline-none"
                     />
                     <button
                       type="button"
@@ -1678,14 +1376,14 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         }
                         setIsEditingGoal(false);
                       }}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold"
+                      className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
                     >
                       Simpan
                     </button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-black text-emerald-300">
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-black text-emerald-700">
                       {analytics.goalProgressPct}%
                     </span>
                     <button
@@ -1694,16 +1392,16 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         setGoalInputDraft(formatDotInput(monthlyProfitGoal));
                         setIsEditingGoal(true);
                       }}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-700 flex items-center gap-1"
                     >
-                      <Edit3 className="w-3 h-3 text-amber-400" />
+                      <Edit3 className="w-3 h-3 text-amber-800" />
                       <span>Ubah Target</span>
                     </button>
                   </div>
                 )}
               </div>
 
-              <div className="w-full h-2.5 rounded-full bg-slate-950 border border-slate-800 overflow-hidden p-0.5">
+              <div className="w-full h-2.5 rounded-full bg-slate-50 border border-slate-200 overflow-hidden p-0.5">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-300 transition-all duration-500"
                   style={{ width: `${analytics.goalProgressPct}%` }}
@@ -1721,18 +1419,18 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
             </div>
 
             {/* BUSINESS FINANCIAL FLOWCHART */}
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
+            <div className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-200 flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-emerald-700" />
                     <span>Flowchart Arus Keuangan & Perputaran Modal Bisnis</span>
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-600">
                     Alur perputaran modal dari belanja stok hingga realisasi kas & laba bersih
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-bold text-emerald-300">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px] font-bold text-emerald-700">
                   ROI Stok Aktif:{' '}
                   {analytics.totalModalStok > 0
                     ? Math.round((analytics.potensiProfitStok / analytics.totalModalStok) * 100)
@@ -1742,88 +1440,88 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-11 gap-2 items-center pt-1">
-                <div className="lg:col-span-2 p-3 rounded-2xl bg-slate-950 border border-sky-500/35 relative">
-                  <span className="text-[10px] font-extrabold uppercase text-sky-400 block">
+                <div className="lg:col-span-2 p-3 rounded-2xl bg-slate-50 border border-sky-500/35 relative">
+                  <span className="text-[10px] font-extrabold uppercase text-sky-700 block">
                     1. Total Modal Masuk
                   </span>
-                  <p className="text-sm font-black text-white mt-1">
+                  <p className="text-sm font-black text-slate-900 mt-1">
                     {formatIDR(analytics.totalModalKeseluruhan)}
                   </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
+                  <p className="text-[10px] text-slate-600 mt-0.5">
                     Stok Aktif + Modal Terjual
                   </p>
                 </div>
 
-                <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-600">
+                <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-500">
                   <ArrowRight className="w-5 h-5 text-emerald-500/70" />
                 </div>
 
                 <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-amber-500/35">
-                    <span className="text-[10px] font-extrabold uppercase text-amber-400 block">
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-amber-500/35">
+                    <span className="text-[10px] font-extrabold uppercase text-amber-800 block">
                       2A. Aset di Brankas
                     </span>
-                    <p className="text-xs sm:text-sm font-black text-amber-200 mt-1">
+                    <p className="text-xs sm:text-sm font-black text-amber-800 mt-1">
                       {formatIDR(analytics.totalModalStok)}
                     </p>
-                    <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-400 space-y-0.5">
+                    <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-[10px] text-slate-600 space-y-0.5">
                       <div className="flex justify-between">
                         <span>Pokémon ({analytics.pokemonCount})</span>
-                        <span className="text-slate-200 font-semibold">{formatIDR(analytics.pokemonModal)}</span>
+                        <span className="text-slate-700 font-semibold">{formatIDR(analytics.pokemonModal)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>One Piece ({analytics.onePieceCount})</span>
-                        <span className="text-slate-200 font-semibold">{formatIDR(analytics.onePieceModal)}</span>
+                        <span className="text-slate-700 font-semibold">{formatIDR(analytics.onePieceModal)}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-teal-500/35">
-                    <span className="text-[10px] font-extrabold uppercase text-teal-400 block">
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-teal-500/35">
+                    <span className="text-[10px] font-extrabold uppercase text-teal-700 block">
                       2B. Modal Terlikuidasi
                     </span>
-                    <p className="text-xs sm:text-sm font-black text-teal-200 mt-1">
+                    <p className="text-xs sm:text-sm font-black text-teal-700 mt-1">
                       {formatIDR(analytics.totalCostSold)}
                     </p>
-                    <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-400 space-y-0.5">
+                    <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-[10px] text-slate-600 space-y-0.5">
                       <div className="flex justify-between">
                         <span>Omzet Masuk</span>
-                        <span className="text-emerald-300 font-semibold">{formatIDR(analytics.totalOmzet)}</span>
+                        <span className="text-emerald-700 font-semibold">{formatIDR(analytics.totalOmzet)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Item Terjual</span>
-                        <span className="text-slate-200 font-semibold">{analytics.soldCount} kartu</span>
+                        <span className="text-slate-700 font-semibold">{analytics.soldCount} kartu</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-600">
+                <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-500">
                   <ArrowRight className="w-5 h-5 text-emerald-500/70" />
                 </div>
 
-                <div className="lg:col-span-3 p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-1.5">
-                  <span className="text-[10px] font-extrabold uppercase text-emerald-400 block">
+                <div className="lg:col-span-3 p-3 rounded-2xl bg-slate-50 border border-emerald-500/40 space-y-1.5">
+                  <span className="text-[10px] font-extrabold uppercase text-emerald-700 block">
                     3. Kas Laba & Proyeksi
                   </span>
                   <p
                     className={`text-sm font-black ${
-                      analytics.totalNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      analytics.totalNetProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
                     {analytics.totalNetProfit >= 0 ? '+' : ''}
                     {formatIDR(analytics.totalNetProfit)}
                   </p>
-                  <div className="pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-400 space-y-0.5">
+                  <div className="pt-1.5 border-t border-slate-200 text-[10px] text-slate-600 space-y-0.5">
                     <div className="flex justify-between">
                       <span>Est. Nilai Stok</span>
-                      <span className="text-amber-300 font-semibold">
+                      <span className="text-amber-800 font-semibold">
                         {formatIDR(analytics.totalEstimasiJual)}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Potensi Profit</span>
-                      <span className="text-emerald-300 font-semibold">
+                      <span className="text-emerald-700 font-semibold">
                         +{formatIDR(analytics.potensiProfitStok)}
                       </span>
                     </div>
@@ -1833,13 +1531,13 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
             </div>
 
             {/* Category Asset Distribution */}
-            <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-4">
+            <div className="rounded-2xl bg-white border border-slate-200 p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-700" />
                   <span>Distribusi Kategori Stok Aktif</span>
                 </h3>
-                <span className="text-[11px] text-slate-400">{analytics.inStockCount} Item</span>
+                <span className="text-[11px] text-slate-600">{analytics.inStockCount} Item</span>
               </div>
               <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                 {analytics.categoryStats.map((cat) => {
@@ -1848,14 +1546,14 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       ? Math.round((cat.modal / analytics.totalModalStok) * 100)
                       : 0;
                   return (
-                    <div key={cat.name} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                    <div key={cat.name} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                       <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="font-bold text-slate-200">
+                        <span className="font-bold text-slate-700">
                           {cat.name} <span className="text-slate-500">({cat.count})</span>
                         </span>
-                        <span className="font-extrabold text-emerald-300">{formatIDR(cat.modal)}</span>
+                        <span className="font-extrabold text-emerald-700">{formatIDR(cat.modal)}</span>
                       </div>
-                      <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div className="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400"
                           style={{ width: `${pct}%` }}
@@ -1872,16 +1570,16 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 2: INVENTORY AKTIF ==================== */}
         {activeTab === 'inventory' && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-3 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
-                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
+            <div className="rounded-2xl bg-white border border-slate-200 p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-50 border border-slate-200">
                   <button
                     type="button"
                     onClick={() => setFilterTcg('ALL')}
                     className={`px-3 py-1 rounded-lg text-xs font-extrabold transition ${
                       filterTcg === 'ALL'
-                        ? 'bg-slate-800 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-slate-100 text-slate-900'
+                        : 'text-slate-600 hover:text-slate-700'
                     }`}
                   >
                     Semua TCG ({analytics.inStockCount})
@@ -1891,8 +1589,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     onClick={() => setFilterTcg('POKEMON')}
                     className={`px-3 py-1 rounded-lg text-xs font-extrabold transition ${
                       filterTcg === 'POKEMON'
-                        ? 'bg-emerald-500 text-slate-950'
-                        : 'text-slate-400 hover:text-emerald-300'
+                        ? 'bg-emerald-700 text-white'
+                        : 'text-slate-600 hover:text-emerald-700'
                     }`}
                   >
                     Pokémon ({analytics.pokemonCount})
@@ -1902,8 +1600,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     onClick={() => setFilterTcg('ONE_PIECE')}
                     className={`px-3 py-1 rounded-lg text-xs font-extrabold transition ${
                       filterTcg === 'ONE_PIECE'
-                        ? 'bg-rose-500 text-white'
-                        : 'text-slate-400 hover:text-rose-300'
+                        ? 'bg-rose-700 text-white'
+                        : 'text-slate-600 hover:text-rose-700'
                     }`}
                   >
                     One Piece ({analytics.onePieceCount})
@@ -1911,15 +1609,15 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-slate-400">
-                    Menampilkan <strong className="text-slate-200">{filteredCards.length}</strong> kartu aktif
+                  <span className="text-[11px] text-slate-600">
+                    Menampilkan <strong className="text-slate-700">{filteredCards.length}</strong> kartu aktif
                   </span>
                   <button
                     type="button"
                     onClick={handleExportInventoryExcel}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 transition"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-700 text-xs font-extrabold flex items-center gap-1.5 transition"
                   >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                     <span>Export Excel (.xls)</span>
                   </button>
                 </div>
@@ -1927,30 +1625,31 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
 
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Cari nama kartu, set, nomor (mis. OP05-119 / 349/190), grade, atau binder..."
-                    className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => setSearchQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-900"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:flex items-center gap-2">
+                <button type="button" className="cx-filter-toggle" aria-expanded={showFilters} onClick={()=>setShowFilters(v=>!v)}>{showFilters?'Tutup filter':'Filter lainnya'}</button>
+                <div className={`${showFilters?'grid':'hidden'} grid-cols-2 sm:grid items-center gap-2 cx-filters`}>
                   <select
                     value={filterCategory}
                     onChange={(e) => setFilterCategory(e.target.value)}
-                    className="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="px-2.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="ALL">Semua Kategori</option>
                     {categories.map((cat) => (
@@ -1963,7 +1662,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   <select
                     value={filterLanguage}
                     onChange={(e) => setFilterLanguage(e.target.value)}
-                    className="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="px-2.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="ALL">Semua Bahasa</option>
                     {POKEMON_LANGUAGES.map((lang) => (
@@ -1976,7 +1675,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   <select
                     value={filterGrading}
                     onChange={(e) => setFilterGrading(e.target.value)}
-                    className="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="px-2.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="ALL">Semua Grade/Raw</option>
                     {GRADING_COMPANIES.map((g) => (
@@ -1989,7 +1688,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   <select
                     value={filterStorage}
                     onChange={(e) => setFilterStorage(e.target.value)}
-                    className="px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    className="px-2.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="ALL">Semua Penyimpanan</option>
                     {storageLocations.map((loc) => (
@@ -2003,9 +1702,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
             </div>
 
             {filteredCards.length === 0 ? (
-              <div className="rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 p-10 text-center">
-                <Package className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                <p className="text-sm font-bold text-slate-300">Tidak ada kartu stok aktif yang cocok</p>
+              <div className="rounded-2xl bg-white border border-dashed border-slate-200 p-10 text-center">
+                <Package className="w-10 h-10 text-slate-500 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-700">Tidak ada kartu stok aktif yang cocok</p>
                 <p className="text-xs text-slate-500 mt-1">
                   Coba ubah filter pencarian atau tambahkan kartu baru ke inventory.
                 </p>
@@ -2014,26 +1713,25 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                 {filteredCards.map((card) => {
                   const estProfit = card.targetPrice - card.buyPrice;
-                  const marketLinks = getMarketAppLinks(card);
                   const gradingCo = card.gradingCompany || getGradingCompany(card.grade);
                   const tcgMeta = getTcgMeta(card.tcg);
 
                   return (
                     <div
                       key={card.id}
-                      onClick={() => openCardDetailWithMarketIntel(card)}
-                      className="group cursor-pointer rounded-2xl bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 transition-all overflow-hidden flex flex-col justify-between shadow-lg"
+                      onClick={() => openCardDetail(card)}
+                      className="cx-card group cursor-pointer rounded-2xl bg-white hover:bg-white border border-slate-200 hover:border-emerald-500/50 transition-all overflow-hidden flex flex-col justify-between shadow-sm"
                     >
                       <div>
-                        <div className="relative h-40 bg-slate-950 overflow-hidden border-b border-slate-800/80">
+                        <div className="relative h-40 bg-slate-50 overflow-hidden border-b border-slate-200">
                           {card.imageUrl ? (
                             <img
                               src={card.imageUrl}
                               alt={card.name}
-                              className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
+                              loading="lazy" decoding="async" className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
                             />
                           ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-emerald-950/20 to-slate-950 p-3">
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 p-3">
                               <RayquazaLogo className="w-12 h-12 opacity-60" />
                               <span className="text-[10px] font-bold text-slate-500 mt-1">
                                 {tcgMeta.label.toUpperCase()}
@@ -2047,14 +1745,14 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             >
                               {card.tcg === 'ONE_PIECE' ? 'OP' : 'PKM'}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded-md bg-slate-950/90 border border-slate-700 text-[10px] font-extrabold text-amber-300">
+                            <span className="px-1.5 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-[10px] font-extrabold text-amber-800">
                               {card.language}
                             </span>
                             <span
                               className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold border ${
                                 gradingCo === 'Raw'
-                                  ? 'bg-slate-950/90 border-slate-700 text-slate-300'
-                                  : 'bg-emerald-950/90 border-emerald-500/40 text-emerald-300'
+                                  ? 'bg-slate-50 border-slate-200 text-slate-700'
+                                  : 'bg-emerald-50 border-emerald-500/40 text-emerald-700'
                               }`}
                             >
                               {card.grade}
@@ -2065,7 +1763,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             <button
                               type="button"
                               onClick={(e) => handleOpenEditCard(e, card)}
-                              className="p-1.5 rounded-lg bg-slate-950/90 hover:bg-emerald-500 text-slate-200 hover:text-slate-950 border border-slate-700 transition"
+                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-emerald-500 text-slate-700 hover:text-slate-950 border border-slate-200 transition"
                               title="Edit Kartu"
                             >
                               <Edit3 className="w-3 h-3" />
@@ -2073,7 +1771,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             <button
                               type="button"
                               onClick={(e) => handleDeleteCard(e, card.id)}
-                              className="p-1.5 rounded-lg bg-slate-950/90 hover:bg-rose-500 text-slate-200 hover:text-white border border-slate-700 transition"
+                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-500 text-slate-700 hover:text-slate-900 border border-slate-200 transition"
                               title="Hapus Kartu"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -2083,36 +1781,36 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
 
                         <div className="p-3 space-y-2">
                           <div>
-                            <h3 className="text-xs sm:text-sm font-extrabold text-white line-clamp-1 group-hover:text-emerald-300 transition">
+                            <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 line-clamp-1 group-hover:text-emerald-700 transition">
                               {card.name}
                             </h3>
-                            <p className="text-[11px] text-slate-400 truncate">
+                            <p className="text-[11px] text-slate-600 truncate">
                               {card.setName ? (
                                 <>
                                   {card.setName} •{' '}
-                                  <span className="text-slate-300 font-semibold">{card.number}</span>
+                                  <span className="text-slate-700 font-semibold">{card.number}</span>
                                 </>
                               ) : (
-                                <span className="text-slate-300 font-semibold">No. {card.number}</span>
+                                <span className="text-slate-700 font-semibold">No. {card.number}</span>
                               )}
                             </p>
                           </div>
 
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 bg-slate-950/70 px-2 py-1 rounded-lg border border-slate-800/70">
+                          <div className="flex items-center justify-between text-[10px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
                             <span className="truncate">{card.category}</span>
-                            <span className="text-emerald-400 font-bold truncate max-w-[110px]">
+                            <span className="text-emerald-700 font-bold truncate max-w-[110px]">
                               {card.storageLocation}
                             </span>
                           </div>
 
                           <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                            <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                            <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
                               <span className="block text-[10px] text-slate-500">Modal HPP</span>
-                              <span className="text-xs font-bold text-slate-200">{formatIDR(card.buyPrice)}</span>
+                              <span className="text-xs font-bold text-slate-700">{formatIDR(card.buyPrice)}</span>
                             </div>
-                            <div className="p-2 rounded-xl bg-slate-950/80 border border-emerald-500/20">
-                              <span className="block text-[10px] text-emerald-400/80">Target Jual</span>
-                              <span className="text-xs font-extrabold text-emerald-300">
+                            <div className="p-2 rounded-xl bg-slate-50 border border-emerald-500/20">
+                              <span className="block text-[10px] text-emerald-700">Target Jual</span>
+                              <span className="text-xs font-extrabold text-emerald-700">
                                 {formatIDR(card.targetPrice)}
                               </span>
                             </div>
@@ -2121,51 +1819,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       </div>
 
                       <div className="px-3 pb-3 pt-1 space-y-2">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <a
-                            href={marketLinks.pricecharting.webUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => handleOpenMarketApp(e, 'pricecharting', card)}
-                            className="px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold text-sky-300 flex items-center justify-center gap-1 transition"
-                          >
-                            <span>PriceCharting</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                          <a
-                            href={marketLinks.ebay.webUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => handleOpenMarketApp(e, 'ebay', card)}
-                            className="px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold text-amber-300 flex items-center justify-center gap-1 transition"
-                          >
-                            <span>eBay Sold</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                          <a
-                            href={marketLinks.snkrdunk.webUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => handleOpenMarketApp(e, 'snkrdunk', card)}
-                            className="px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold text-rose-300 flex items-center justify-center gap-1 transition"
-                          >
-                            <span>SNKRDUNK</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                          <a
-                            href={marketLinks.collectr.webUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => handleOpenMarketApp(e, 'collectr', card)}
-                            className="px-2 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] font-bold text-emerald-300 flex items-center justify-center gap-1 transition"
-                          >
-                            <span>Collectr</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                        </div>
-
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                          <span className="text-[10px] font-bold text-emerald-400">
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+                          <span className="text-[10px] font-bold text-emerald-700">
                             Est. +{formatIDR(estProfit)}
                           </span>
                           <button
@@ -2176,7 +1831,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                               setPosDealPrice(formatDotInput(card.targetPrice));
                               setActiveTab('pos');
                             }}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 text-[11px] font-extrabold transition"
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-700 hover:text-slate-950 text-[11px] font-extrabold transition"
                           >
                             Jual
                           </button>
@@ -2193,16 +1848,16 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 3: ARCHIVE KARTU SOLD ==================== */}
         {activeTab === 'sold' && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-3.5 space-y-3">
+            <div className="rounded-2xl bg-white border border-slate-200 p-3.5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
-                    <Archive className="w-4 h-4 text-amber-400" />
+                  <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                    <Archive className="w-4 h-4 text-amber-800" />
                     <span>Arsip Kartu Terjual ({soldCards.length})</span>
                   </h2>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-600">
                     Total Profit dari Kartu Terjual:{' '}
-                    <span className="text-emerald-400 font-bold">
+                    <span className="text-emerald-700 font-bold">
                       {formatIDR(
                         soldCards.reduce((sum, c) => sum + ((c.soldPrice || 0) - (c.buyPrice || 0)), 0)
                       )}
@@ -2210,26 +1865,26 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   </p>
                 </div>
                 <div className="relative w-full sm:w-72">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={soldSearchQuery}
                     onChange={(e) => setSoldSearchQuery(e.target.value)}
                     placeholder="Cari arsip kartu sold..."
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-50 border border-slate-200">
                   <button
                     type="button"
                     onClick={() => setSoldFilterTcg('ALL')}
                     className={`px-3 py-1 rounded-lg text-xs font-extrabold transition ${
                       soldFilterTcg === 'ALL'
-                        ? 'bg-slate-800 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-slate-100 text-slate-900'
+                        : 'text-slate-600 hover:text-slate-700'
                     }`}
                   >
                     Semua TCG ({cards.filter((c) => c.status === 'SOLD').length})
@@ -2239,8 +1894,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     onClick={() => setSoldFilterTcg('POKEMON')}
                     className={`px-3 py-1 rounded-lg text-xs font-extrabold transition ${
                       soldFilterTcg === 'POKEMON'
-                        ? 'bg-emerald-500 text-slate-950'
-                        : 'text-slate-400 hover:text-emerald-300'
+                        ? 'bg-emerald-700 text-white'
+                        : 'text-slate-600 hover:text-emerald-700'
                     }`}
                   >
                     Pokémon ({cards.filter((c) => c.status === 'SOLD' && (c.tcg || 'POKEMON') === 'POKEMON').length})
@@ -2250,8 +1905,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     onClick={() => setSoldFilterTcg('ONE_PIECE')}
                     className={`px-3 py-1 rounded-lg text-xs font-extrabold transition ${
                       soldFilterTcg === 'ONE_PIECE'
-                        ? 'bg-rose-500 text-white'
-                        : 'text-slate-400 hover:text-rose-300'
+                        ? 'bg-rose-700 text-white'
+                        : 'text-slate-600 hover:text-rose-700'
                     }`}
                   >
                     One Piece ({cards.filter((c) => c.status === 'SOLD' && c.tcg === 'ONE_PIECE').length})
@@ -2261,9 +1916,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
             </div>
 
             {soldCards.length === 0 ? (
-              <div className="rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 p-10 text-center">
-                <Archive className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                <p className="text-sm font-bold text-slate-300">Belum ada kartu berstatus Sold untuk filter ini</p>
+              <div className="rounded-2xl bg-white border border-dashed border-slate-200 p-10 text-center">
+                <Archive className="w-10 h-10 text-slate-500 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-700">Belum ada kartu berstatus Sold untuk filter ini</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -2273,20 +1928,20 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   return (
                     <div
                       key={card.id}
-                      onClick={() => openCardDetailWithMarketIntel(card)}
-                      className="cursor-pointer rounded-2xl bg-slate-900/75 border border-slate-800 hover:border-amber-500/40 overflow-hidden transition"
+                      onClick={() => openCardDetail(card)}
+                      className="cursor-pointer rounded-2xl bg-white border border-slate-200 hover:border-amber-500/40 overflow-hidden transition"
                     >
-                      <div className="relative h-36 bg-slate-950 border-b border-slate-800">
+                      <div className="relative h-36 bg-slate-50 border-b border-slate-200">
                         {card.imageUrl ? (
                           <img
                             src={card.imageUrl}
                             alt={card.name}
-                            className="w-full h-full object-contain p-2 opacity-85"
+                            loading="lazy" decoding="async" className="w-full h-full object-contain p-2 opacity-85"
                           />
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center">
                             <RayquazaLogo className="w-10 h-10 opacity-40" />
-                            <span className="text-[10px] font-bold text-slate-600 mt-1">
+                            <span className="text-[10px] font-bold text-slate-500 mt-1">
                               {tcgMeta.label.toUpperCase()}
                             </span>
                           </div>
@@ -2297,39 +1952,39 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                           >
                             {card.tcg === 'ONE_PIECE' ? 'OP' : 'PKM'}
                           </span>
-                          <span className="px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-[10px] font-extrabold text-rose-300">
+                          <span className="px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-[10px] font-extrabold text-rose-700">
                             SOLD • {card.language}
                           </span>
                         </div>
-                        <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-slate-950/90 border border-slate-700 text-[10px] font-bold text-slate-300">
+                        <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-700">
                           {card.grade}
                         </span>
                       </div>
 
                       <div className="p-3 space-y-2">
                         <div>
-                          <h3 className="text-xs sm:text-sm font-extrabold text-slate-200 truncate">{card.name}</h3>
+                          <h3 className="text-xs sm:text-sm font-extrabold text-slate-700 truncate">{card.name}</h3>
                           <p className="text-[11px] text-slate-500 truncate">
                             {card.setName ? `${card.setName} • ${card.number}` : `No. ${card.number}`}
                           </p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-1.5 text-xs">
-                          <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                          <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
                             <span className="block text-[10px] text-slate-500">Modal</span>
-                            <span className="font-bold text-slate-300">{formatIDR(card.buyPrice)}</span>
+                            <span className="font-bold text-slate-700">{formatIDR(card.buyPrice)}</span>
                           </div>
-                          <div className="p-2 rounded-xl bg-slate-950 border border-amber-500/20">
-                            <span className="block text-[10px] text-amber-400/80">Laku Di</span>
-                            <span className="font-extrabold text-amber-300">{formatIDR(card.soldPrice)}</span>
+                          <div className="p-2 rounded-xl bg-slate-50 border border-amber-500/20">
+                            <span className="block text-[10px] text-amber-800">Laku Di</span>
+                            <span className="font-extrabold text-amber-800">{formatIDR(card.soldPrice)}</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[11px]">
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-[11px]">
                           <span className="text-slate-500">Profit Bersih</span>
                           <span
                             className={`font-extrabold ${
-                              realizedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                              realizedProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                             }`}
                           >
                             {realizedProfit >= 0 ? '+' : ''}
@@ -2348,23 +2003,23 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 4: KASIR / PENJUALAN (POS) ==================== */}
         {activeTab === 'pos' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-7 rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
+            <div className="lg:col-span-7 rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
-                  <ShoppingBag className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-emerald-700" />
                   <span>1. Pilih Kartu Terjual dari Stok</span>
                 </h2>
-                <span className="text-xs text-slate-400">{posFilteredInventory.length} stok tersedia</span>
+                <span className="text-xs text-slate-600">{posFilteredInventory.length} stok tersedia</span>
               </div>
 
               <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={posSearchQuery}
                   onChange={(e) => setPosSearchQuery(e.target.value)}
                   placeholder="Cari nama kartu, nomor, set, atau grade di kasir..."
-                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
@@ -2386,25 +2041,25 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         className={`cursor-pointer p-3 rounded-xl border transition flex items-center justify-between gap-3 ${
                           isSelected
                             ? 'bg-emerald-950/40 border-emerald-500 shadow-md shadow-emerald-950/40'
-                            : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                            : 'bg-slate-50 border-slate-200 hover:border-slate-200'
                         }`}
                       >
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-extrabold text-white truncate">{card.name}</span>
-                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-amber-300">
+                            <span className="text-xs font-extrabold text-slate-900 truncate">{card.name}</span>
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-amber-800">
                               {card.language}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-[10px] font-bold text-emerald-300">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-[10px] font-bold text-emerald-700">
                               {card.grade}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                          <p className="text-[11px] text-slate-600 truncate mt-0.5">
                             {card.setName ? `${card.setName} (${card.number})` : `No. ${card.number}`} • Modal: {formatIDR(card.buyPrice)}
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className="text-xs font-extrabold text-emerald-300">
+                          <span className="text-xs font-extrabold text-emerald-700">
                             {formatIDR(card.targetPrice)}
                           </span>
                           <span className="block text-[10px] text-slate-500">Target</span>
@@ -2418,32 +2073,32 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
 
             <form
               onSubmit={handleCompleteSale}
-              className="lg:col-span-5 rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-4 h-fit"
+              className="lg:col-span-5 rounded-2xl bg-white border border-slate-200 p-4 space-y-4 h-fit"
             >
-              <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-amber-800" />
                 <span>2. Input Harga Deal & Selesaikan</span>
               </h2>
 
               {selectedPosCard ? (
-                <div className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-1">
-                  <p className="text-xs font-extrabold text-emerald-300">{selectedPosCard.name}</p>
-                  <p className="text-[11px] text-slate-400">
+                <div className="p-3 rounded-xl bg-slate-50 border border-emerald-500/30 space-y-1">
+                  <p className="text-xs font-extrabold text-emerald-700">{selectedPosCard.name}</p>
+                  <p className="text-[11px] text-slate-600">
                     {selectedPosCard.setName ? `${selectedPosCard.setName} • ` : ''}
                     {selectedPosCard.number} • {selectedPosCard.grade}
                   </p>
-                  <p className="text-[11px] text-slate-300 pt-1">
+                  <p className="text-[11px] text-slate-700 pt-1">
                     Modal Kartu (HPP): <span className="font-bold">{formatIDR(selectedPosCard.buyPrice)}</span>
                   </p>
                 </div>
               ) : (
-                <div className="p-3 rounded-xl bg-slate-950/70 border border-dashed border-slate-800 text-xs text-slate-500">
+                <div className="p-3 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-xs text-slate-500">
                   Klik salah satu kartu di sebelah kiri terlebih dahulu.
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Laku Di Harga / Deal Price (IDR) *
                 </label>
                 <input
@@ -2453,12 +2108,12 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   value={posDealPrice}
                   onChange={(e) => setPosDealPrice(formatDotInput(e.target.value))}
                   placeholder="Contoh: 3.500.000"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-extrabold text-amber-300 focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-extrabold text-amber-800 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Catatan Transaksi (Opsional)
                 </label>
                 <input
@@ -2466,24 +2121,24 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   value={posNotes}
                   onChange={(e) => setPosNotes(e.target.value)}
                   placeholder="Misal: COD Bandung / Transfer BCA"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">Harga Laku</span>
-                  <span className="font-bold text-white">{formatIDR(posCalculation.deal)}</span>
+                  <span className="text-slate-600">Harga Laku</span>
+                  <span className="font-bold text-slate-900">{formatIDR(posCalculation.deal)}</span>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">Modal HPP</span>
-                  <span className="font-bold text-slate-300">- {formatIDR(posCalculation.cost)}</span>
+                  <span className="text-slate-600">Modal HPP</span>
+                  <span className="font-bold text-slate-700">- {formatIDR(posCalculation.cost)}</span>
                 </div>
-                <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                  <span className="text-xs font-extrabold text-slate-200">Laba Bersih</span>
+                <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
+                  <span className="text-xs font-extrabold text-slate-700">Laba Bersih</span>
                   <span
                     className={`text-sm font-black ${
-                      posCalculation.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      posCalculation.profit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
                     {posCalculation.profit >= 0 ? '+' : ''}
@@ -2495,7 +2150,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               <button
                 type="submit"
                 disabled={!selectedPosCard}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-40 text-slate-950 text-xs sm:text-sm font-extrabold shadow-lg shadow-emerald-500/20 transition"
+                className="w-full py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white text-xs sm:text-sm font-extrabold shadow-sm shadow-emerald-500/20 transition"
               >
                 Konfirmasi Terjual & Masuk Arsip Sold
               </button>
@@ -2506,9 +2161,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 5: TUKAR TAMBAH (TRADE-IN) ==================== */}
         {activeTab === 'trade' && (
           <form onSubmit={handleExecuteTradeIn} className="space-y-4">
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-2xl bg-white border border-slate-200 p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
                   Skema Selisih Uang Tunai (Cash)
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
@@ -2523,8 +2178,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       onClick={() => setTradeCashFlowType(opt.id)}
                       className={`px-2.5 py-2 rounded-xl text-[11px] font-extrabold border transition ${
                         tradeCashFlowType === opt.id
-                          ? 'bg-amber-500/20 border-amber-400 text-amber-200'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-800'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-700'
                       }`}
                     >
                       {opt.label}
@@ -2534,7 +2189,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
                   Nominal Cash (IDR)
                 </label>
                 <input
@@ -2544,36 +2199,36 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   value={tradeCashFlowType === 'EVEN' ? '0' : tradeCashAmount}
                   onChange={(e) => setTradeCashAmount(formatDotInput(e.target.value))}
                   placeholder="Contoh: 1.500.000"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm font-extrabold text-amber-300 disabled:opacity-40 focus:outline-none focus:border-amber-400"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm font-extrabold text-amber-800 disabled:opacity-40 focus:outline-none focus:border-amber-400"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
+              <div className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs sm:text-sm font-extrabold text-rose-300">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-rose-700">
                     Kartu Toko yang Keluar ({tradeOutCardIds.length})
                   </h3>
-                  <span className="text-[11px] text-slate-400">
+                  <span className="text-[11px] text-slate-600">
                     Modal Keluar: {formatIDR(tradeSummary.totalOutCost)}
                   </span>
                 </div>
 
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-3.5 h-3.5 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={tradeOutSearch}
                     onChange={(e) => setTradeOutSearch(e.target.value)}
                     placeholder="Cari kartu stok toko yang keluar..."
-                    className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-rose-400"
+                    className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-rose-400"
                   />
                   {tradeOutSearch && (
                     <button
                       type="button"
                       onClick={() => setTradeOutSearch('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-900"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -2590,19 +2245,19 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         className={`cursor-pointer p-2.5 rounded-xl border transition flex items-center justify-between gap-2 ${
                           checked
                             ? 'bg-rose-950/35 border-rose-500/60'
-                            : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                            : 'bg-slate-50 border-slate-200 hover:border-slate-200'
                         }`}
                       >
                         <div className="min-w-0">
-                          <p className="text-xs font-bold text-white truncate">
+                          <p className="text-xs font-bold text-slate-900 truncate">
                             {checked ? '✓ ' : ''}
                             {card.name} ({card.language} • {card.grade})
                           </p>
-                          <p className="text-[10px] text-slate-400 truncate">
+                          <p className="text-[10px] text-slate-600 truncate">
                             {card.setName ? `${card.setName} • ${card.number}` : `No. ${card.number}`}
                           </p>
                         </div>
-                        <span className="text-xs font-bold text-slate-300 shrink-0">
+                        <span className="text-xs font-bold text-slate-700 shrink-0">
                           {formatIDR(card.buyPrice)}
                         </span>
                       </div>
@@ -2611,15 +2266,15 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
+              <div className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs sm:text-sm font-extrabold text-emerald-300">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-emerald-700">
                     Kartu Masuk ke Inventory ({tradeInItems.length})
                   </h3>
                   <button
                     type="button"
                     onClick={handleAddTradeInRow}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-bold text-emerald-300 flex items-center gap-1"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-bold text-emerald-700 flex items-center gap-1"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Tambah Kartu Masuk</span>
@@ -2630,17 +2285,17 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   {tradeInItems.map((item, idx) => (
                     <div
                       key={item.tempId}
-                      className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2"
+                      className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-extrabold text-emerald-400">
+                        <span className="text-[11px] font-extrabold text-emerald-700">
                           Kartu Masuk #{idx + 1}
                         </span>
                         {tradeInItems.length > 1 && (
                           <button
                             type="button"
                             onClick={() => handleRemoveTradeInRow(item.tempId)}
-                            className="text-[11px] text-rose-400 hover:underline"
+                            className="text-[11px] text-rose-700 hover:underline"
                           >
                             Hapus
                           </button>
@@ -2657,7 +2312,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                               )
                             )
                           }
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-bold text-slate-200"
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700"
                         >
                           {TCG_GAMES.map((t) => (
                             <option key={t.id} value={t.id}>
@@ -2676,7 +2331,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             )
                           }
                           placeholder="Nama Kartu (Mew ex / Luffy)"
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900"
                         />
                         <input
                           type="text"
@@ -2689,7 +2344,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             )
                           }
                           placeholder="Nomor (205/165 / OP05-119)"
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900"
                         />
                       </div>
 
@@ -2703,7 +2358,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                               )
                             )
                           }
-                          className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
+                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
                         >
                           {POKEMON_LANGUAGES.map((l) => (
                             <option key={l.code} value={l.code}>
@@ -2728,7 +2383,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                               )
                             );
                           }}
-                          className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
+                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
                         >
                           {GRADING_COMPANIES.map((g) => (
                             <option key={g} value={g}>
@@ -2748,7 +2403,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             )
                           }
                           placeholder="Grade (PSA 10 / Raw)"
-                          className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900"
                         />
                       </div>
 
@@ -2762,7 +2417,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                               )
                             )
                           }
-                          className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
+                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
                         >
                           {categories.map((c) => (
                             <option key={c} value={c}>
@@ -2782,7 +2437,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                               )
                             )
                           }
-                          className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
+                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
                         >
                           {storageLocations.map((loc) => (
                             <option key={loc} value={loc}>
@@ -2807,7 +2462,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             )
                           }
                           placeholder="Valuasi Deal / Jadi HPP (mis. 2.000.000)"
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-amber-300 font-bold"
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-amber-800 font-bold"
                         />
                         <input
                           type="text"
@@ -2823,7 +2478,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             )
                           }
                           placeholder="Target Harga Jual (mis. 2.500.000)"
-                          className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-emerald-300 font-bold"
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-emerald-700 font-bold"
                         />
                       </div>
                     </div>
@@ -2832,19 +2487,19 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="rounded-2xl bg-white border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1">
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-600">
                   Valuasi Kartu Masuk:{' '}
-                  <span className="font-bold text-emerald-300">{formatIDR(tradeSummary.totalInValuation)}</span> •
+                  <span className="font-bold text-emerald-700">{formatIDR(tradeSummary.totalInValuation)}</span> •
                   Modal Kartu Keluar:{' '}
-                  <span className="font-bold text-rose-300">{formatIDR(tradeSummary.totalOutCost)}</span>
+                  <span className="font-bold text-rose-700">{formatIDR(tradeSummary.totalOutCost)}</span>
                 </p>
-                <p className="text-xs sm:text-sm font-extrabold text-white">
+                <p className="text-xs sm:text-sm font-extrabold text-slate-900">
                   Dampak Laba Bersih Trade-In:{' '}
                   <span
                     className={
-                      tradeSummary.tradeNetProfitImpact >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      tradeSummary.tradeNetProfitImpact >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }
                   >
                     {tradeSummary.tradeNetProfitImpact >= 0 ? '+' : ''}
@@ -2859,11 +2514,11 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   value={tradeNotes}
                   onChange={(e) => setTradeNotes(e.target.value)}
                   placeholder="Catatan trade-in (opsional)..."
-                  className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                  className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 hover:from-amber-300 hover:to-emerald-300 text-slate-950 text-xs sm:text-sm font-extrabold shrink-0 shadow-lg"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 hover:from-amber-300 hover:to-emerald-300 text-slate-950 text-xs sm:text-sm font-extrabold shrink-0 shadow-sm"
                 >
                   Proses Tukar Tambah
                 </button>
@@ -2875,25 +2530,25 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 6: RIWAYAT & LABA ==================== */}
         {activeTab === 'history' && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="rounded-2xl bg-white border border-slate-200 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap flex-1 items-center gap-2">
                 <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-600 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={historySearch}
                     onChange={(e) => setHistorySearch(e.target.value)}
                     placeholder="Cari ID transaksi, nama kartu, tanggal, catatan..."
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
 
                 <div className="relative flex items-center">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 pointer-events-none" />
+                  <Calendar className="w-3.5 h-3.5 text-amber-800 absolute left-2.5 pointer-events-none" />
                   <select
                     value={historyMonthFilter}
                     onChange={(e) => setHistoryMonthFilter(e.target.value)}
-                    className="pl-8 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-amber-200 focus:outline-none focus:border-amber-400"
+                    className="pl-8 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-amber-800 focus:outline-none focus:border-amber-400"
                     title="Filter Bulan Transaksi"
                   >
                     <option value="ALL">Semua Bulan</option>
@@ -2908,7 +2563,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 <select
                   value={historyTcgFilter}
                   onChange={(e) => setHistoryTcgFilter(e.target.value)}
-                  className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"
+                  className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700"
                 >
                   <option value="ALL">Semua TCG</option>
                   <option value="POKEMON">Pokémon</option>
@@ -2918,7 +2573,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 <select
                   value={historyTypeFilter}
                   onChange={(e) => setHistoryTypeFilter(e.target.value)}
-                  className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"
+                  className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700"
                 >
                   <option value="ALL">Semua Tipe</option>
                   <option value="SALE">Penjualan (POS)</option>
@@ -2930,26 +2585,26 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 <button
                   type="button"
                   onClick={handleExportCSV}
-                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-extrabold flex items-center gap-1.5 transition"
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-extrabold flex items-center gap-1.5 transition"
                 >
-                  <Download className="w-3.5 h-3.5 text-sky-400" />
+                  <Download className="w-3.5 h-3.5 text-sky-700" />
                   <span>Export CSV</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleExportHistoryExcel}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 transition"
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-700 text-xs font-extrabold flex items-center gap-1.5 transition"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                   <span>Export Excel (.xls)</span>
                 </button>
               </div>
             </div>
 
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 overflow-hidden">
+            <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
               <div className="max-h-[460px] overflow-auto">
                 <table className="w-full text-left border-collapse">
-                  <thead className="sticky top-0 bg-slate-950 border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
+                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-600">
                     <tr>
                       <th className="py-2.5 px-3">ID & Tanggal</th>
                       <th className="py-2.5 px-3">TCG</th>
@@ -2964,14 +2619,14 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     {filteredTransactions.map((trx) => {
                       const trxTcg = trx.tcg || 'POKEMON';
                       return (
-                        <tr key={trx.id} className="hover:bg-slate-800/40 transition">
+                        <tr key={trx.id} className="hover:bg-slate-100 transition">
                           <td className="py-2.5 px-3 whitespace-nowrap">
-                            <span className="font-bold text-slate-200 block">{trx.id}</span>
+                            <span className="font-bold text-slate-700 block">{trx.id}</span>
                             <span className="text-[10px] text-slate-500">{trx.date}</span>
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap">
                             {trxTcg === 'ONE_PIECE' ? (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-500/15 text-rose-700 border border-rose-500/30">
                                 One Piece
                               </span>
                             ) : trxTcg === 'MIXED' ? (
@@ -2979,7 +2634,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                                 PKM + OP
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-500/15 text-emerald-700 border border-emerald-500/30">
                                 Pokémon
                               </span>
                             )}
@@ -2988,26 +2643,26 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             <span
                               className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
                                 trx.type === 'SALE'
-                                  ? 'bg-emerald-500/15 text-emerald-300'
-                                  : 'bg-amber-500/15 text-amber-300'
+                                  ? 'bg-emerald-500/15 text-emerald-700'
+                                  : 'bg-amber-500/15 text-amber-800'
                               }`}
                             >
                               {trx.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH'}
                             </span>
                           </td>
                           <td className="py-2.5 px-3">
-                            <p className="font-semibold text-slate-200">{trx.summary}</p>
+                            <p className="font-semibold text-slate-700">{trx.summary}</p>
                             {trx.notes && <p className="text-[10px] text-slate-500">{trx.notes}</p>}
                           </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-200 whitespace-nowrap">
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-700 whitespace-nowrap">
                             {formatIDR(trx.revenue)}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-slate-400 whitespace-nowrap">
+                          <td className="py-2.5 px-3 text-right text-slate-600 whitespace-nowrap">
                             {formatIDR(trx.costBasis)}
                           </td>
                           <td
                             className={`py-2.5 px-3 text-right font-extrabold whitespace-nowrap ${
-                              trx.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                              trx.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                             }`}
                           >
                             {trx.netProfit >= 0 ? '+' : ''}
@@ -3024,15 +2679,15 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         )}
       </main>
 
-      {/* ==================== MODAL 1: CARD DETAIL & LIVE MARKET INTEL ==================== */}
+      {/* ==================== MODAL 1: CARD DETAIL ==================== */}
       {selectedDetailCard && (
         <div
           onClick={() => setSelectedDetailCard(null)}
-          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+          className="cx-modal fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-4 sm:p-6 space-y-4"
+            className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white border border-slate-200 shadow-xl p-4 sm:p-6 space-y-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -3044,34 +2699,34 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   >
                     {getTcgMeta(selectedDetailCard.tcg).label}
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-[11px] font-extrabold text-amber-300">
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-[11px] font-extrabold text-amber-800">
                     {selectedDetailCard.language} • {getLanguageLabel(selectedDetailCard.language)}
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-extrabold text-emerald-300">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-extrabold text-emerald-700">
                     {selectedDetailCard.grade}
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-800 text-[11px] font-bold text-slate-300">
+                  <span className="px-2 py-0.5 rounded-md bg-slate-100 text-[11px] font-bold text-slate-700">
                     {selectedDetailCard.storageLocation}
                   </span>
                 </div>
-                <h2 className="text-base sm:text-xl font-black text-white">{selectedDetailCard.name}</h2>
-                <p className="text-xs text-slate-400">
+                <h2 className="text-base sm:text-xl font-black text-slate-900">{selectedDetailCard.name}</h2>
+                <p className="text-xs text-slate-600">
                   {selectedDetailCard.setName ? `${selectedDetailCard.setName} • ` : ''}
-                  Nomor: <span className="text-slate-200 font-bold">{selectedDetailCard.number}</span>
+                  Nomor: <span className="text-slate-700 font-bold">{selectedDetailCard.number}</span>
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => setSelectedDetailCard(null)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-              <div className="sm:col-span-4 rounded-2xl bg-slate-950 border border-slate-800 h-52 flex items-center justify-center p-2">
+              <div className="sm:col-span-4 rounded-2xl bg-slate-50 border border-slate-200 h-52 flex items-center justify-center p-2">
                 {selectedDetailCard.imageUrl ? (
                   <img
                     src={selectedDetailCard.imageUrl}
@@ -3085,150 +2740,30 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
 
               <div className="sm:col-span-8 space-y-3">
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
                     <span className="block text-[10px] text-slate-500">Modal HPP</span>
-                    <span className="text-xs sm:text-sm font-extrabold text-white">
+                    <span className="text-xs sm:text-sm font-extrabold text-slate-900">
                       {formatIDR(selectedDetailCard.buyPrice)}
                     </span>
                   </div>
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-emerald-500/30">
-                    <span className="block text-[10px] text-emerald-400">Target Jual</span>
-                    <span className="text-xs sm:text-sm font-extrabold text-emerald-300">
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-emerald-500/30">
+                    <span className="block text-[10px] text-emerald-700">Target Jual</span>
+                    <span className="text-xs sm:text-sm font-extrabold text-emerald-700">
                       {formatIDR(selectedDetailCard.targetPrice)}
                     </span>
                   </div>
-                  <div className="p-3 rounded-2xl bg-slate-950 border border-amber-500/30">
-                    <span className="block text-[10px] text-amber-400">Est. Profit</span>
-                    <span className="text-xs sm:text-sm font-extrabold text-amber-300">
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-amber-500/30">
+                    <span className="block text-[10px] text-amber-800">Est. Profit</span>
+                    <span className="text-xs sm:text-sm font-extrabold text-amber-800">
                       +{formatIDR(selectedDetailCard.targetPrice - selectedDetailCard.buyPrice)}
                     </span>
                   </div>
                 </div>
 
-                {(() => {
-                  const links = getMarketAppLinks(selectedDetailCard);
-                  return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <a
-                        href={links.ebay.webUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => handleOpenMarketApp(e, 'ebay', selectedDetailCard)}
-                        className="px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-extrabold text-amber-300 flex items-center justify-center gap-1.5"
-                      >
-                        <span>eBay Sold</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                      <a
-                        href={links.pricecharting.webUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => handleOpenMarketApp(e, 'pricecharting', selectedDetailCard)}
-                        className="px-3 py-2 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-xs font-extrabold text-sky-300 flex items-center justify-center gap-1.5"
-                      >
-                        <span>PriceCharting</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                      <a
-                        href={links.snkrdunk.webUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => handleOpenMarketApp(e, 'snkrdunk', selectedDetailCard)}
-                        className="px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-xs font-extrabold text-rose-300 flex items-center justify-center gap-1.5"
-                      >
-                        <span>SNKRDUNK</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                      <a
-                        href={links.collectr.webUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => handleOpenMarketApp(e, 'collectr', selectedDetailCard)}
-                        className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-extrabold text-emerald-300 flex items-center justify-center gap-1.5"
-                      >
-                        <span>Collectr</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  );
-                })()}
-
-                <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Intelijen Harga Pasar 4 Platform</span>
-                    </span>
-                    <button
-                      type="button"
-                      disabled={marketLoadingId === selectedDetailCard.id}
-                      onClick={() => fetchMarketIntelligence(selectedDetailCard, true)}
-                      className="text-[11px] font-bold text-slate-300 hover:text-emerald-300 flex items-center gap-1"
-                    >
-                      <RefreshCw
-                        className={`w-3 h-3 ${
-                          marketLoadingId === selectedDetailCard.id ? 'animate-spin text-emerald-400' : ''
-                        }`}
-                      />
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-
-                  {marketLoadingId === selectedDetailCard.id ? (
-                    <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-400">
-                      <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                      <span>Mengambil data eBay Last Sold, PriceCharting, SNKRDUNK & Collectr...</span>
-                    </div>
-                  ) : marketCache[selectedDetailCard.id] ? (
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                          <span className="text-[10px] font-bold text-amber-400 block">eBay Last Sold</span>
-                          <span className="font-extrabold text-white">
-                            {marketCache[selectedDetailCard.id].ebaySold?.range}
-                          </span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            {marketCache[selectedDetailCard.id].ebaySold?.note}
-                          </p>
-                        </div>
-                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                          <span className="text-[10px] font-bold text-sky-400 block">PriceCharting</span>
-                          <span className="font-extrabold text-white">
-                            {marketCache[selectedDetailCard.id].priceCharting?.range}
-                          </span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            {marketCache[selectedDetailCard.id].priceCharting?.note}
-                          </p>
-                        </div>
-                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                          <span className="text-[10px] font-bold text-rose-400 block">SNKRDUNK</span>
-                          <span className="font-extrabold text-white">
-                            {marketCache[selectedDetailCard.id].snkrdunk?.range}
-                          </span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            {marketCache[selectedDetailCard.id].snkrdunk?.note}
-                          </p>
-                        </div>
-                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-                          <span className="text-[10px] font-bold text-emerald-400 block">Collectr</span>
-                          <span className="font-extrabold text-white">
-                            {marketCache[selectedDetailCard.id].collectr?.range}
-                          </span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            {marketCache[selectedDetailCard.id].collectr?.note}
-                          </p>
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-slate-300 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
-                        {marketCache[selectedDetailCard.id].verdict}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-200">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -3238,9 +2773,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       'Caption jualan WA/IG berhasil disalin!'
                     )
                   }
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5"
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1.5"
                 >
-                  <Share2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <Share2 className="w-3.5 h-3.5 text-emerald-700" />
                   <span>Salin Caption Jualan</span>
                 </button>
                 <button
@@ -3250,9 +2785,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     setSelectedDetailCard(null);
                     handleOpenEditCard(e, c);
                   }}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5"
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1.5"
                 >
-                  <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                  <Edit3 className="w-3.5 h-3.5 text-amber-800" />
                   <span>Edit Kartu</span>
                 </button>
               </div>
@@ -3281,21 +2816,21 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
       {isCardModalOpen && (
         <div
           onClick={() => setIsCardModalOpen(false)}
-          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+          className="cx-modal fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
         >
           <form
             onSubmit={handleSaveCard}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-4 sm:p-6 space-y-4"
+            className="cx-card-form w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white border border-slate-200 shadow-xl p-4 sm:p-6 space-y-4"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base sm:text-lg font-black text-white">
+              <h2 className="text-base sm:text-lg font-black text-slate-900">
                 {editingCard ? 'Edit Data Kartu TCG' : 'Tambah Kartu Baru ke Inventory'}
               </h2>
               <button
                 type="button"
                 onClick={() => setIsCardModalOpen(false)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3303,7 +2838,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Seri Permainan Kartu (TCG)
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -3317,9 +2852,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         className={`py-2 px-3 rounded-xl text-xs font-extrabold border transition ${
                           active
                             ? game.id === 'ONE_PIECE'
-                              ? 'bg-rose-500/20 border-rose-400 text-rose-200'
-                              : 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                              ? 'bg-rose-500/20 border-rose-400 text-rose-700'
+                              : 'bg-emerald-500/20 border-emerald-400 text-emerald-700'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-700'
                         }`}
                       >
                         {game.label} TCG
@@ -3330,7 +2865,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Nama Kartu *
                 </label>
                 <input
@@ -3343,12 +2878,13 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       ? 'Contoh: Monkey D. Luffy Manga Rare / Nami SP'
                       : 'Contoh: Charizard ex SAR / Umbreon VMAX Alt Art'
                   }
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
+              <details className="cx-extra sm:col-span-2" open={editingCard ? true : undefined}><summary>Detail kartu & penyimpanan</summary><div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-3">
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Nama Set / Ekspansi <span className="text-slate-500 font-normal">(Opsional)</span>
                 </label>
                 <input
@@ -3360,27 +2896,27 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       ? 'Contoh: Awakening of the New Era (OP-05)'
                       : 'Contoh: Shiny Treasure ex (sv4a)'
                   }
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Nomor Kartu</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nomor Kartu</label>
                 <input
                   type="text"
                   value={cardForm.number}
                   onChange={(e) => setCardForm({ ...cardForm, number: e.target.value })}
                   placeholder={cardForm.tcg === 'ONE_PIECE' ? 'Contoh: OP05-119' : 'Contoh: 349/190'}
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">Bahasa Kartu</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Bahasa Kartu</label>
                 <select
                   value={cardForm.language}
                   onChange={(e) => setCardForm({ ...cardForm, language: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 >
                   {POKEMON_LANGUAGES.map((lang) => (
                     <option key={lang.code} value={lang.code}>
@@ -3392,19 +2928,19 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-300">Kategori</label>
+                  <label className="text-xs font-bold text-slate-700">Kategori</label>
                   <div className="flex items-center gap-2 text-[11px]">
                     <button
                       type="button"
                       onClick={() => setShowInlineCategoryInput((v) => !v)}
-                      className="text-emerald-400 font-bold hover:underline"
+                      className="text-emerald-700 font-bold hover:underline"
                     >
                       + Tambah Baru
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsCategoryModalOpen(true)}
-                      className="text-slate-400 hover:text-white"
+                      className="text-slate-600 hover:text-slate-900"
                     >
                       Kelola
                     </button>
@@ -3428,7 +2964,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         }
                       }}
                       placeholder="Nama kategori baru..."
-                      className="flex-1 px-2.5 py-2 rounded-xl bg-slate-950 border border-emerald-500 text-xs text-white"
+                      className="flex-1 px-2.5 py-2 rounded-xl bg-slate-50 border border-emerald-500 text-xs text-slate-900"
                     />
                     <button
                       type="button"
@@ -3440,7 +2976,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                           setShowInlineCategoryInput(false);
                         }
                       }}
-                      className="px-3 py-2 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold"
+                      className="px-3 py-2 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
                     >
                       Simpan
                     </button>
@@ -3449,7 +2985,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   <select
                     value={cardForm.category}
                     onChange={(e) => setCardForm({ ...cardForm, category: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                   >
                     {categories.map((cat) => (
                       <option key={cat} value={cat}>
@@ -3461,7 +2997,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Jenis Grading / Raw
                 </label>
                 <select
@@ -3474,7 +3010,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       grade: co === 'Raw' ? 'Raw NM/M' : `${co} 10`
                     });
                   }}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 >
                   {GRADING_COMPANIES.map((g) => (
                     <option key={g} value={g}>
@@ -3485,7 +3021,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
                   Skor Grade / Kondisi Spesifik
                 </label>
                 <input
@@ -3493,25 +3029,25 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   value={cardForm.grade}
                   onChange={(e) => setCardForm({ ...cardForm, grade: e.target.value })}
                   placeholder="Misal: PSA 10, BGS 9.5, atau Raw NM/M"
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 />
               </div>
 
               <div className="sm:col-span-2">
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-300">Lokasi Penyimpanan Fisik</label>
+                  <label className="text-xs font-bold text-slate-700">Lokasi Penyimpanan Fisik</label>
                   <div className="flex items-center gap-2 text-[11px]">
                     <button
                       type="button"
                       onClick={() => setShowInlineStorageInput((v) => !v)}
-                      className="text-emerald-400 font-bold hover:underline"
+                      className="text-emerald-700 font-bold hover:underline"
                     >
                       + Tambah Baru
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsStorageModalOpen(true)}
-                      className="text-slate-400 hover:text-white"
+                      className="text-slate-600 hover:text-slate-900"
                     >
                       Kelola
                     </button>
@@ -3535,7 +3071,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         }
                       }}
                       placeholder="Contoh: Binder 3 - Ultra Rare"
-                      className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-emerald-500 text-xs text-white"
+                      className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-emerald-500 text-xs text-slate-900"
                     />
                     <button
                       type="button"
@@ -3547,7 +3083,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                           setShowInlineStorageInput(false);
                         }
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold"
+                      className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
                     >
                       Simpan
                     </button>
@@ -3556,7 +3092,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   <select
                     value={cardForm.storageLocation}
                     onChange={(e) => setCardForm({ ...cardForm, storageLocation: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                   >
                     {storageLocations.map((loc) => (
                       <option key={loc} value={loc}>
@@ -3567,8 +3103,9 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 )}
               </div>
 
+              </div></details>
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Harga Modal Kartu / HPP (IDR) *
                 </label>
                 <div className="relative">
@@ -3584,13 +3121,13 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       setCardForm({ ...cardForm, buyPrice: formatDotInput(e.target.value) })
                     }
                     placeholder="2.500.000"
-                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-white"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-900"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   Target Harga Jual (IDR) *
                 </label>
                 <div className="relative">
@@ -3606,16 +3143,16 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       setCardForm({ ...cardForm, targetPrice: formatDotInput(e.target.value) })
                     }
                     placeholder="3.250.000"
-                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-emerald-300 font-bold"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-emerald-700 font-bold"
                   />
                 </div>
               </div>
             </div>
 
             <div className="space-y-2 pt-1">
-              <label className="block text-xs font-bold text-slate-300">Foto Kartu TCG</label>
+              <label className="block text-xs font-bold text-slate-700">Foto Kartu TCG</label>
               <div className="flex flex-wrap items-center gap-2">
-                <label className="cursor-pointer px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                <label className="cursor-pointer px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-bold text-emerald-700 flex items-center gap-1.5">
                   <Camera className="w-3.5 h-3.5" />
                   <span>Foto Langsung</span>
                   <input
@@ -3627,8 +3164,8 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   />
                 </label>
 
-                <label className="cursor-pointer px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                  <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                <label className="cursor-pointer px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5 text-amber-800" />
                   <span>Upload File / Galeri</span>
                   <input
                     type="file"
@@ -3642,7 +3179,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   <button
                     type="button"
                     onClick={() => setCardForm({ ...cardForm, imageUrl: '' })}
-                    className="px-2.5 py-2 rounded-xl bg-rose-500/15 text-rose-300 text-xs font-bold"
+                    className="px-2.5 py-2 rounded-xl bg-rose-500/15 text-rose-700 text-xs font-bold"
                   >
                     Hapus Foto
                   </button>
@@ -3654,11 +3191,11 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 value={cardForm.imageUrl}
                 onChange={(e) => setCardForm({ ...cardForm, imageUrl: e.target.value })}
                 placeholder="Atau tempel URL gambar kartu (https://...)..."
-                className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700"
               />
 
               {cardForm.imageUrl && (
-                <div className="h-32 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center p-2">
+                <div className="h-32 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center p-2">
                   <img
                     src={cardForm.imageUrl}
                     alt="Preview"
@@ -3668,17 +3205,17 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="cx-form-footer flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
               <button
                 type="button"
                 onClick={() => setIsCardModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
               >
                 Batal
               </button>
               <button
                 type="submit"
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs sm:text-sm font-extrabold"
+                className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-extrabold"
               >
                 {editingCard ? 'Simpan Perubahan' : 'Simpan ke Inventory'}
               </button>
@@ -3691,21 +3228,21 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
       {isStorageModalOpen && (
         <div
           onClick={() => setIsStorageModalOpen(false)}
-          className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+          className="cx-modal fixed inset-0 z-[70] bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-5 space-y-4"
+            className="w-full max-w-md rounded-3xl bg-white border border-slate-200 shadow-xl p-5 space-y-4"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-black text-white flex items-center gap-2">
-                <FolderArchive className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <FolderArchive className="w-4 h-4 text-emerald-700" />
                 <span>Lokasi Penyimpanan Fisik</span>
               </h2>
               <button
                 type="button"
                 onClick={() => setIsStorageModalOpen(false)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                className="p-1.5 rounded-xl bg-slate-100 text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3723,14 +3260,14 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   }
                 }}
                 placeholder="Nama binder / brankas baru..."
-                className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900"
               />
               <button
                 type="button"
                 onClick={() => {
                   if (handleAddStorageLocation(newStorageInput)) setNewStorageInput('');
                 }}
-                className="px-3.5 py-2 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold"
+                className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
               >
                 Tambah
               </button>
@@ -3744,16 +3281,16 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 return (
                   <div
                     key={loc}
-                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
+                    className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
                   >
                     <div>
-                      <span className="font-bold text-slate-200">{loc}</span>
+                      <span className="font-bold text-slate-700">{loc}</span>
                       <span className="text-[11px] text-slate-500 ml-2">({count} kartu aktif)</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => handleRemoveStorageLocation(loc)}
-                      className="p-1 text-slate-500 hover:text-rose-400"
+                      className="p-1 text-slate-500 hover:text-rose-700"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -3769,21 +3306,21 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
       {isCategoryModalOpen && (
         <div
           onClick={() => setIsCategoryModalOpen(false)}
-          className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+          className="cx-modal fixed inset-0 z-[70] bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-5 space-y-4"
+            className="w-full max-w-md rounded-3xl bg-white border border-slate-200 shadow-xl p-5 space-y-4"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-black text-white flex items-center gap-2">
-                <Tags className="w-4 h-4 text-amber-400" />
+              <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <Tags className="w-4 h-4 text-amber-800" />
                 <span>Kategori Produk TCG</span>
               </h2>
               <button
                 type="button"
                 onClick={() => setIsCategoryModalOpen(false)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-300"
+                className="p-1.5 rounded-xl bg-slate-100 text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3801,7 +3338,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   }
                 }}
                 placeholder="Nama kategori baru..."
-                className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900"
               />
               <button
                 type="button"
@@ -3822,16 +3359,16 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 return (
                   <div
                     key={cat}
-                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
+                    className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
                   >
                     <div>
-                      <span className="font-bold text-slate-200">{cat}</span>
+                      <span className="font-bold text-slate-700">{cat}</span>
                       <span className="text-[11px] text-slate-500 ml-2">({count} kartu aktif)</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => handleRemoveCategory(cat)}
-                      className="p-1 text-slate-500 hover:text-rose-400"
+                      className="p-1 text-slate-500 hover:text-rose-700"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
