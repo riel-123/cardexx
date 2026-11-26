@@ -372,13 +372,8 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
 
   // Master Data: Categories & Storage Locations
-  const [categories, setCategories] = useState(['Single Card', 'Graded Slab', 'Sealed Box', 'Booster Pack']);
-  const [storageLocations, setStorageLocations] = useState([
-    'Binder 1 - High End',
-    'Binder 2 - AR / SR',
-    'Brankas Slab Utama',
-    'Rak Sealed Box', 'Binder 3', 'Binder 4', 'Binder 5', 'Binder 6', 'Binder 7', 'Binder 8', 'Binder 9', 'Binder 10', 'Toploader Box', 'Deck Box', 'Rak Booster Pack', 'Brankas 2'
-  ]);
+  const [categories, setCategories] = useState([]);
+  const [storageLocations, setStorageLocations] = useState([]);
 
   // Inventory Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -490,17 +485,25 @@ export default function App() {
     const base = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
     if (!base) throw new Error('VITE_API_URL belum dikonfigurasi');
     const response = await fetch(base + path, { method, ...(body === undefined ? {} : {headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)}), cache: 'no-store' });
-    if (!response.ok) throw new Error(`API ${response.status}: ${path}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || `API ${response.status}: ${path}`);
+    }
     return response.json();
   };
   const loadData = async () => {
     setConnection('loading');
     try {
-      const [loadedCards, loadedTransactions] = await Promise.all([api('/cards'), api('/transactions')]);
+      const [loadedCards, loadedTransactions, master] = await Promise.all([api('/cards'), api('/transactions'), api('/master-data')]);
       if (!Array.isArray(loadedCards) || !Array.isArray(loadedTransactions)) throw new Error('Format respons API tidak valid');
       setCards(loadedCards); setTransactions(loadedTransactions);
-      setCategories(prev => [...new Set([...prev, ...loadedCards.map(c => c.category).filter(Boolean)])]);
-      setStorageLocations(prev => [...new Set([...prev, ...loadedCards.map(c => c.storageLocation).filter(Boolean)])]);
+      if (!Array.isArray(master.categories) || !Array.isArray(master.storageLocations)) throw new Error('Master data tidak valid');
+      setCategories(master.categories);
+      setStorageLocations(master.storageLocations);
+      setTradeInItems(prev => prev.map(row => ({...row,
+        category: master.categories.includes(row.category) ? row.category : master.categories[0] || '',
+        storageLocation: master.storageLocations.includes(row.storageLocation) ? row.storageLocation : master.storageLocations[0] || ''
+      })));
       setConnection('ready');
     } catch (error) { setConnectionError(error.message); setConnection('error'); }
   };
@@ -738,6 +741,8 @@ export default function App() {
       return;
     }
 
+    if ((!editingCard || editingCard.status === 'IN_STOCK') && (!categories.includes(cardForm.category) || !storageLocations.includes(cardForm.storageLocation))) { showToast('Pilih kategori dan lokasi penyimpanan aktif.', 'error'); return; }
+
     const payload = {
       tcg: cardForm.tcg || 'POKEMON',
       name: cardForm.name.trim(),
@@ -863,6 +868,7 @@ export default function App() {
         return;
       }
 
+      if (validInItems.some(item => !categories.includes(item.category) || !storageLocations.includes(item.storageLocation))) { showToast('Pilih kategori dan lokasi penyimpanan aktif untuk setiap kartu masuk.', 'error'); return; }
       const newCardsFromTrade = validInItems.map((item, idx) => {
         const valCost = parseDotNumber(item.valuationCost);
         const targetSell = parseDotNumber(item.targetSellPrice) || Math.round(valCost * 1.25);
@@ -954,46 +960,45 @@ export default function App() {
   };
 
   // --- CATEGORY & STORAGE LOCATION MANAGEMENT ---
-  const handleAddCategory = (name) => {
+  const addMaster = async (kind, name) => {
     const trimmed = name.trim();
     if (!trimmed) return null;
-    const exists = categories.find((c) => c.toLowerCase() === trimmed.toLowerCase());
-    if (exists) return exists;
-    setCategories((prev) => [...prev, trimmed]);
-    showToast(`Kategori "${trimmed}" ditambahkan.`);
-    return trimmed;
+    let created = null;
+    const ok = await persist(async () => {
+      const result = await api('/master-data/' + kind, 'POST', {name: trimmed});
+      created = result.name;
+      const setter = kind === 'categories' ? setCategories : setStorageLocations;
+      setter(prev => [...new Set([...prev, created])].sort((a,b)=>a.localeCompare(b)));
+      showToast(`"${created}" ditambahkan ke database.`);
+    });
+    return ok ? created : null;
   };
-
-  const handleRemoveCategory = (name) => {
-    if (categories.length <= 1) {
-      showToast('Minimal harus tersisa 1 kategori.', 'error');
-      return;
-    }
-    setCategories((prev) => prev.filter((c) => c !== name));
-    if (filterCategory === name) setFilterCategory('ALL');
-    showToast(`Kategori "${name}" dihapus.`);
+  const handleAddCategory = name => addMaster('categories', name);
+  const handleAddStorageLocation = name => addMaster('storage', name);
+  const removeMaster = async (kind, name) => {
+    if (!window.confirm(`Arsipkan "${name}"? Riwayat kartu terjual tetap disimpan.`)) return;
+    await persist(async () => {
+      await api('/master-data/' + kind + '/' + encodeURIComponent(name), 'DELETE');
+      if (kind === 'categories') {
+        const remaining = categories.filter(c => c !== name);
+        setCategories(remaining);
+        if (filterCategory === name) setFilterCategory('ALL');
+        setCardForm(prev => prev.category === name ? {...prev, category: remaining[0] || ''} : prev);
+        setTradeInItems(prev => prev.map(row => row.category === name ? {...row, category: remaining[0] || ''} : row));
+      } else {
+        const remaining = storageLocations.filter(c => c !== name);
+        setStorageLocations(remaining);
+        if (filterStorage === name) setFilterStorage('ALL');
+        if (mobileBinder === name) setMobileBinder(null);
+        if (exportStorage === name) setExportStorage('ALL');
+        setCardForm(prev => prev.storageLocation === name ? {...prev, storageLocation: remaining[0] || ''} : prev);
+        setTradeInItems(prev => prev.map(row => row.storageLocation === name ? {...row, storageLocation: remaining[0] || ''} : row));
+      }
+      showToast(`"${name}" diarsipkan.`);
+    });
   };
-
-  const handleAddStorageLocation = (name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    const exists = storageLocations.find((s) => s.toLowerCase() === trimmed.toLowerCase());
-    if (exists) return exists;
-    setStorageLocations((prev) => [...prev, trimmed]);
-    showToast(`Lokasi penyimpanan "${trimmed}" ditambahkan.`);
-    return trimmed;
-  };
-
-  const handleRemoveStorageLocation = (name) => {
-    if (cards.some(c=>c.storageLocation===name)) { showToast('Lokasi masih memiliki kartu atau arsip terjual.', 'error'); return; }
-    if (storageLocations.length <= 1) {
-      showToast('Minimal harus tersisa 1 lokasi penyimpanan.', 'error');
-      return;
-    }
-    setStorageLocations((prev) => prev.filter((s) => s !== name));
-    if (filterStorage === name) setFilterStorage('ALL');
-    showToast(`Lokasi "${name}" dihapus.`);
-  };
+  const handleRemoveCategory = name => removeMaster('categories', name);
+  const handleRemoveStorageLocation = name => removeMaster('storage', name);
 
   // --- PROMO CAPTION & CSV EXPORT ---
   const generatePromoCaption = (card) => {
@@ -1496,7 +1501,7 @@ export default function App() {
         {activeTab === 'inventory' && <section className="cx-binder-picker" hidden={mobileBinder!==null}>
           <h3 className="font-bold text-slate-900 mb-2">Pilih lokasi penyimpanan</h3>
           <p className="text-xs text-slate-500 mb-3">Buka binder untuk melihat kartu di dalamnya.</p>
-          <div className="grid grid-cols-2 gap-2">{['ALL',...new Set([...storageLocations,...availableInventory.map(c=>c.storageLocation).filter(Boolean)])].map(loc=>{const count=availableInventory.filter(c=>loc==='ALL'||c.storageLocation===loc).length;return <button key={loc} type="button" className="cx-binder-tile" onClick={()=>{setMobileBinder(loc);setFilterStorage(loc);setSearchQuery('');setFilterTcg('ALL');setFilterCategory('ALL');setFilterLanguage('ALL');setFilterGrading('ALL');}}><FolderArchive className="w-5 h-5 text-emerald-700"/><strong>{loc==='ALL'?'Semua kartu':loc}</strong><span>{count} kartu aktif</span></button>})}</div>
+          <div className="grid grid-cols-2 gap-2">{['ALL',...storageLocations].map(loc=>{const count=availableInventory.filter(c=>loc==='ALL'||c.storageLocation===loc).length;return <button key={loc} type="button" className="cx-binder-tile" onClick={()=>{setMobileBinder(loc);setFilterStorage(loc);setSearchQuery('');setFilterTcg('ALL');setFilterCategory('ALL');setFilterLanguage('ALL');setFilterGrading('ALL');}}><FolderArchive className="w-5 h-5 text-emerald-700"/><strong>{loc==='ALL'?'Semua kartu':loc}</strong><span>{count} kartu aktif</span></button>})}</div>
         </section>}
         {activeTab === 'inventory' && (
           <div className={`space-y-4 ${mobileBinder===null?'cx-mobile-inventory-hidden':''}`}>
@@ -2868,10 +2873,10 @@ export default function App() {
                       type="text"
                       value={inlineCategoryName}
                       onChange={(e) => setInlineCategoryName(e.target.value)}
-                      onKeyDown={(e) => {
+                      onKeyDown={async (e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          const created = handleAddCategory(inlineCategoryName);
+                          const created = await handleAddCategory(inlineCategoryName);
                           if (created) {
                             setCardForm({ ...cardForm, category: created, gradingCompany: created === 'Graded Slab' ? 'PSA' : 'Raw', grade: created === 'Graded Slab' ? 'PSA 10' : 'Raw NM/M' });
                             setInlineCategoryName('');
@@ -2884,8 +2889,8 @@ export default function App() {
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        const created = handleAddCategory(inlineCategoryName);
+                      onClick={async () => {
+                        const created = await handleAddCategory(inlineCategoryName);
                         if (created) {
                           setCardForm({ ...cardForm, category: created, gradingCompany: created === 'Graded Slab' ? 'PSA' : 'Raw', grade: created === 'Graded Slab' ? 'PSA 10' : 'Raw NM/M' });
                           setInlineCategoryName('');
@@ -3109,10 +3114,10 @@ export default function App() {
                 type="text"
                 value={newStorageInput}
                 onChange={(e) => setNewStorageInput(e.target.value)}
-                onKeyDown={(e) => {
+                onKeyDown={async (e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (handleAddStorageLocation(newStorageInput)) setNewStorageInput('');
+                    if (await handleAddStorageLocation(newStorageInput)) setNewStorageInput('');
                   }
                 }}
                 placeholder="Nama binder / brankas baru..."
@@ -3120,8 +3125,8 @@ export default function App() {
               />
               <button
                 type="button"
-                onClick={() => {
-                  if (handleAddStorageLocation(newStorageInput)) setNewStorageInput('');
+                onClick={async () => {
+                  if (await handleAddStorageLocation(newStorageInput)) setNewStorageInput('');
                 }}
                 className="px-3.5 py-2 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
               >
@@ -3187,10 +3192,10 @@ export default function App() {
                 type="text"
                 value={newCategoryInput}
                 onChange={(e) => setNewCategoryInput(e.target.value)}
-                onKeyDown={(e) => {
+                onKeyDown={async (e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (handleAddCategory(newCategoryInput)) setNewCategoryInput('');
+                    if (await handleAddCategory(newCategoryInput)) setNewCategoryInput('');
                   }
                 }}
                 placeholder="Nama kategori baru..."
@@ -3198,8 +3203,8 @@ export default function App() {
               />
               <button
                 type="button"
-                onClick={() => {
-                  if (handleAddCategory(newCategoryInput)) setNewCategoryInput('');
+                onClick={async () => {
+                  if (await handleAddCategory(newCategoryInput)) setNewCategoryInput('');
                 }}
                 className="px-3.5 py-2 rounded-xl bg-amber-400 text-slate-950 text-xs font-extrabold"
               >
