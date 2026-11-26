@@ -33,7 +33,6 @@ import {
   ArrowRight,
   BarChart3,
   ShieldAlert,
-  Target,
   Radar,
   Calendar
 } from 'lucide-react';
@@ -388,6 +387,7 @@ export default function App() {
   const [filterLanguage, setFilterLanguage] = useState('ALL');
   const [filterGrading, setFilterGrading] = useState('ALL');
   const [filterStorage, setFilterStorage] = useState('ALL');
+  const [mobileBinder, setMobileBinder] = useState(null);
 
   // Sold Tab Search & TCG Filter
   const [soldSearchQuery, setSoldSearchQuery] = useState('');
@@ -428,11 +428,8 @@ export default function App() {
   const [historyTypeFilter, setHistoryTypeFilter] = useState('ALL');
   const [historyTcgFilter, setHistoryTcgFilter] = useState('ALL');
   const [historyMonthFilter, setHistoryMonthFilter] = useState('ALL');
-
-  // Monthly Profit Goal State
-  const [monthlyProfitGoal, setMonthlyProfitGoal] = useState(10000000);
-  const [isEditingGoal, setIsEditingGoal] = useState(false);
-  const [goalInputDraft, setGoalInputDraft] = useState('10.000.000');
+  const [exportMonth,setExportMonth]=useState('ALL');
+  const [exportStorage,setExportStorage]=useState('ALL');
 
   const [selectedDetailCard, setSelectedDetailCard] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -550,11 +547,6 @@ export default function App() {
       };
     });
 
-    const goalProgressPct =
-      monthlyProfitGoal > 0
-        ? Math.min(100, Math.max(0, Math.round((totalNetProfit / monthlyProfitGoal) * 100)))
-        : 0;
-
     return {
       inStockCount: inStock.length,
       soldCount: sold.length,
@@ -569,10 +561,9 @@ export default function App() {
       totalCostSold,
       totalNetProfit,
       totalModalKeseluruhan,
-      categoryStats,
-      goalProgressPct
+      categoryStats
     };
-  }, [cards, transactions, categories, monthlyProfitGoal]);
+  }, [cards, transactions, categories]);
 
   const filteredCards = useMemo(() => {
     return cards.filter((c) => {
@@ -709,7 +700,7 @@ export default function App() {
       category: categories[0] || 'Single Card',
       gradingCompany: 'Raw',
       grade: 'Raw NM/M',
-      storageLocation: storageLocations[0] || 'Binder 1 - High End',
+      storageLocation: activeTab==='inventory' && filterStorage!=='ALL' && storageLocations.includes(filterStorage) ? filterStorage : storageLocations[0] || 'Binder 1 - High End',
       buyPrice: '',
       targetPrice: '',
       imageUrl: ''
@@ -1075,6 +1066,7 @@ export default function App() {
   };
 
   const handleExportHistoryExcel = () => {
+    const exportTransactions = transactions.filter(t => exportMonth==='ALL' || String(t.date||'').slice(0,7)===exportMonth);
     try {
       const headers = [
         'ID Transaksi',
@@ -1087,7 +1079,7 @@ export default function App() {
         'Profit Bersih (IDR)',
         'Catatan'
       ];
-      const rows = filteredTransactions.map((t) => [
+      const rows = exportTransactions.map((t) => [
         t.id,
         t.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH',
         t.tcg || 'POKEMON',
@@ -1099,13 +1091,13 @@ export default function App() {
         t.notes || '-'
       ]);
 
-      const totalOmzetFiltered = filteredTransactions.reduce((sum, t) => sum + (Number(t.revenue) || 0), 0);
-      const totalModalFiltered = filteredTransactions.reduce((sum, t) => sum + (Number(t.costBasis) || 0), 0);
-      const totalProfitFiltered = filteredTransactions.reduce((sum, t) => sum + (Number(t.netProfit) || 0), 0);
+      const totalOmzetFiltered = exportTransactions.reduce((sum, t) => sum + (Number(t.revenue) || 0), 0);
+      const totalModalFiltered = exportTransactions.reduce((sum, t) => sum + (Number(t.costBasis) || 0), 0);
+      const totalProfitFiltered = exportTransactions.reduce((sum, t) => sum + (Number(t.netProfit) || 0), 0);
 
-      const monthSuffix = historyMonthFilter !== 'ALL' ? `_${historyMonthFilter}` : '';
+      const monthSuffix = exportMonth !== 'ALL' ? `_${exportMonth}` : '';
       const periodLabel =
-        historyMonthFilter !== 'ALL' ? ` - ${formatMonthLabel(historyMonthFilter)}` : ' - Semua Bulan';
+        exportMonth !== 'ALL' ? ` - ${formatMonthLabel(exportMonth)}` : ' - Semua Bulan';
 
       downloadExcelHtmlSheet({
         filename: `CARDEXX_Riwayat_Laba${monthSuffix}_${new Date().toISOString().slice(0, 10)}.xls`,
@@ -1114,7 +1106,7 @@ export default function App() {
         rows,
         totalsRow: [
           'TOTAL',
-          `${filteredTransactions.length} Trx`,
+          `${exportTransactions.length} Trx`,
           '',
           '',
           'Total Periode Terfilter',
@@ -1132,6 +1124,7 @@ export default function App() {
   };
 
   const handleExportInventoryExcel = () => {
+    const exportCards = availableInventory.filter(c=>exportStorage==='ALL'||c.storageLocation===exportStorage);
     try {
       const headers = [
         'ID Kartu',
@@ -1148,7 +1141,7 @@ export default function App() {
         'Estimasi Profit (IDR)',
         'Status'
       ];
-      const rows = filteredCards.map((c) => {
+      const rows = exportCards.map((c) => {
         const buy = Number(c.buyPrice) || 0;
         const target = Number(c.targetPrice) || 0;
         return [
@@ -1168,19 +1161,19 @@ export default function App() {
         ];
       });
 
-      const totalBuy = filteredCards.reduce((sum, c) => sum + (Number(c.buyPrice) || 0), 0);
-      const totalTarget = filteredCards.reduce((sum, c) => sum + (Number(c.targetPrice) || 0), 0);
+      const totalBuy = exportCards.reduce((sum, c) => sum + (Number(c.buyPrice) || 0), 0);
+      const totalTarget = exportCards.reduce((sum, c) => sum + (Number(c.targetPrice) || 0), 0);
       const totalEstProfit = totalTarget - totalBuy;
 
       downloadExcelHtmlSheet({
         filename: `CARDEXX_Inventory_Stok_${new Date().toISOString().slice(0, 10)}.xls`,
-        sheetTitle: `CARDEXX Inventory Stok Aktif (${filteredCards.length} Kartu)`,
+        sheetTitle: `CARDEXX Inventory Stok Aktif (${exportCards.length} Kartu)`,
         headers,
         rows,
         totalsRow: [
           'TOTAL',
           '',
-          `${filteredCards.length} Kartu`,
+          `${exportCards.length} Kartu`,
           '',
           '',
           '',
@@ -1274,7 +1267,7 @@ export default function App() {
           ].map(({id,label,icon:Icon}) => {
             if (id === 'add-card') return <button key={id} type="button" className="cx-nav-add" aria-label="Tambah kartu" title="Tambah kartu" onClick={handleOpenAddCard}><Icon aria-hidden="true" /></button>;
             const active = id === 'history' ? ['history','sold','binders'].includes(activeTab) : activeTab === id;
-            return <button key={id} type="button" aria-current={active?'page':undefined} className={active?'cx-current':''} onClick={()=>setActiveTab(id)}><Icon className="w-5 h-5"/><span>{label}</span></button>;
+            return <button key={id} type="button" aria-current={active?'page':undefined} className={active?'cx-current':''} onClick={()=>{if(id==='inventory' && activeTab!==id && window.matchMedia('(max-width:639px)').matches){setMobileBinder(null);setFilterStorage('ALL');}setActiveTab(id);}}><Icon className="w-5 h-5"/><span>{label}</span></button>;
           })}
         </nav>
       </header>
@@ -1294,6 +1287,7 @@ export default function App() {
           })}
         </section>}
         {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Penyimpanan <span>{storageLocations.length}</span></button></div>}
+        {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid sm:grid-cols-2 gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Riwayat &amp; laba</label><select aria-label="Bulan untuk ekspor riwayat" value={exportMonth} onChange={e=>setExportMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua bulan</option>{availableMonths.map(ym=><option key={ym} value={ym}>{formatMonthLabel(ym)}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportHistoryExcel}><Download className="w-4 h-4"/> Export riwayat (.xls)</button></div></div></section>}
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-4">
@@ -1346,89 +1340,6 @@ export default function App() {
                   {formatIDR(analytics.totalNetProfit)}
                 </p>
                 <p className="text-[11px] text-slate-600 mt-0.5">Selisih harga laku - modal</p>
-              </div>
-            </div>
-
-            {/* MONTHLY PROFIT GOAL TRACKER */}
-            <div className="rounded-2xl bg-white border border-emerald-500/25 p-4 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
-                    <Target className="w-4 h-4 text-emerald-700" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-900">
-                      Target Profit Bulanan (Monthly Goal Tracker)
-                    </h3>
-                    <p className="text-[11px] text-slate-600">
-                      Tercapai{' '}
-                      <span className="text-emerald-700 font-bold">
-                        {formatIDR(Math.max(0, analytics.totalNetProfit))}
-                      </span>{' '}
-                      dari target{' '}
-                      <span className="text-amber-800 font-bold">{formatIDR(monthlyProfitGoal)}</span>
-                    </p>
-                  </div>
-                </div>
-
-                {isEditingGoal ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={goalInputDraft}
-                      onChange={(e) => setGoalInputDraft(formatDotInput(e.target.value))}
-                      className="w-32 px-2.5 py-1.5 rounded-xl bg-slate-50 border border-emerald-500 text-xs font-extrabold text-amber-800 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const parsed = parseDotNumber(goalInputDraft);
-                        if (parsed > 0) {
-                          setMonthlyProfitGoal(parsed);
-                          showToast(`Target profit bulanan diubah menjadi ${formatIDR(parsed)}`);
-                        }
-                        setIsEditingGoal(false);
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white text-xs font-extrabold"
-                    >
-                      Simpan
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-black text-emerald-700">
-                      {analytics.goalProgressPct}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setGoalInputDraft(formatDotInput(monthlyProfitGoal));
-                        setIsEditingGoal(true);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-700 flex items-center gap-1"
-                    >
-                      <Edit3 className="w-3 h-3 text-amber-800" />
-                      <span>Ubah Target</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="w-full h-2.5 rounded-full bg-slate-50 border border-slate-200 overflow-hidden p-0.5">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-300 transition-all duration-500"
-                  style={{ width: `${analytics.goalProgressPct}%` }}
-                />
-              </div>
-
-              <div className="flex justify-between text-[10px] text-slate-500">
-                <span>Start: Rp 0</span>
-                <span>
-                  {analytics.totalNetProfit >= monthlyProfitGoal
-                    ? 'Target bulan ini sudah terlampaui!'
-                    : `Kurang ${formatIDR(monthlyProfitGoal - Math.max(0, analytics.totalNetProfit))} lagi menuju target`}
-                </span>
               </div>
             </div>
 
@@ -1582,8 +1493,14 @@ export default function App() {
         )}
 
         {/* ==================== TAB 2: INVENTORY AKTIF ==================== */}
+        {activeTab === 'inventory' && <section className="cx-binder-picker" hidden={mobileBinder!==null}>
+          <h3 className="font-bold text-slate-900 mb-2">Pilih lokasi penyimpanan</h3>
+          <p className="text-xs text-slate-500 mb-3">Buka binder untuk melihat kartu di dalamnya.</p>
+          <div className="grid grid-cols-2 gap-2">{['ALL',...new Set([...storageLocations,...availableInventory.map(c=>c.storageLocation).filter(Boolean)])].map(loc=>{const count=availableInventory.filter(c=>loc==='ALL'||c.storageLocation===loc).length;return <button key={loc} type="button" className="cx-binder-tile" onClick={()=>{setMobileBinder(loc);setFilterStorage(loc);setSearchQuery('');setFilterTcg('ALL');setFilterCategory('ALL');setFilterLanguage('ALL');setFilterGrading('ALL');}}><FolderArchive className="w-5 h-5 text-emerald-700"/><strong>{loc==='ALL'?'Semua kartu':loc}</strong><span>{count} kartu aktif</span></button>})}</div>
+        </section>}
         {activeTab === 'inventory' && (
-          <div className="space-y-4">
+          <div className={`space-y-4 ${mobileBinder===null?'cx-mobile-inventory-hidden':''}`}>
+            <div className="cx-binder-back"><button type="button" onClick={()=>{setMobileBinder(null);setFilterStorage('ALL');}} className="cx-filter-toggle">← Pilih binder</button><strong>{mobileBinder==='ALL'?'Semua kartu':mobileBinder}</strong></div>
             <div className="rounded-2xl bg-white border border-slate-200 p-3 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
                 <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-50 border border-slate-200">
@@ -1626,14 +1543,6 @@ export default function App() {
                   <span className="text-[11px] text-slate-600">
                     Menampilkan <strong className="text-slate-700">{filteredCards.length}</strong> kartu aktif
                   </span>
-                  <button
-                    type="button"
-                    onClick={handleExportInventoryExcel}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-700 text-xs font-extrabold flex items-center gap-1.5 transition"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>Export Excel (.xls)</span>
-                  </button>
                 </div>
               </div>
 
@@ -1701,7 +1610,7 @@ export default function App() {
 
                   <select
                     value={filterStorage}
-                    onChange={(e) => setFilterStorage(e.target.value)}
+                    onChange={(e) => {setFilterStorage(e.target.value);if(mobileBinder!==null)setMobileBinder(e.target.value);}}
                     className="px-2.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="ALL">Semua Penyimpanan</option>
@@ -2021,7 +1930,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 text-emerald-700" />
-                  <span>1. Pilih Kartu Terjual dari Stok</span>
+                  <span>Pilih Kartu Terjual dari Stok</span>
                 </h2>
                 <span className="text-xs text-slate-600">{posFilteredInventory.length} stok tersedia</span>
               </div>
@@ -2091,7 +2000,7 @@ export default function App() {
             >
               <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-amber-800" />
-                <span>2. Input Harga Deal & Selesaikan</span>
+                <span>Input Harga Deal & Selesaikan</span>
               </h2>
 
               {selectedPosCard ? (
@@ -2249,22 +2158,23 @@ export default function App() {
                   )}
                 </div>
 
+                <p className="text-xs text-slate-500">Centang beberapa kartu sekaligus. Pilihan tetap tersimpan saat mencari kartu lain.</p>
+                {tradeSummary.outCards.length>0 && <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 space-y-1"><div className="flex items-center justify-between"><strong className="text-xs text-rose-700">{tradeSummary.outCards.length} kartu dipilih</strong><button type="button" onClick={()=>setTradeOutCardIds([])} className="text-xs text-rose-700">Hapus semua</button></div>{tradeSummary.outCards.map(c=><div key={c.id} className="flex items-center justify-between gap-2 text-xs"><span>{c.name}</span><button type="button" aria-label={`Batalkan ${c.name}`} onClick={()=>toggleTradeOutCard(c.id)}><X className="w-4 h-4"/></button></div>)}</div>}
                 <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                   {filteredTradeOutInventory.map((card) => {
                     const checked = tradeOutCardIds.includes(card.id);
                     return (
-                      <div
+                      <label
                         key={card.id}
-                        onClick={() => toggleTradeOutCard(card.id)}
                         className={`cursor-pointer p-2.5 rounded-xl border transition flex items-center justify-between gap-2 ${
                           checked
-                            ? 'bg-rose-950/35 border-rose-500/60'
+                            ? 'bg-rose-50 border-rose-400'
                             : 'bg-slate-50 border-slate-200 hover:border-slate-200'
                         }`}
                       >
-                        <div className="min-w-0">
+                        <input type="checkbox" checked={checked} onChange={()=>toggleTradeOutCard(card.id)} className="w-4 h-4 shrink-0 accent-rose-600"/>
+                        <div className="min-w-0 flex-1">
                           <p className="text-xs font-bold text-slate-900 truncate">
-                            {checked ? '✓ ' : ''}
                             {card.name} ({card.language} • {card.grade})
                           </p>
                           <p className="text-[10px] text-slate-600 truncate">
@@ -2274,7 +2184,7 @@ export default function App() {
                         <span className="text-xs font-bold text-slate-700 shrink-0">
                           {formatIDR(card.buyPrice)}
                         </span>
-                      </div>
+                      </label>
                     );
                   })}
                 </div>
@@ -2603,14 +2513,6 @@ export default function App() {
                 >
                   <Download className="w-3.5 h-3.5 text-sky-700" />
                   <span>Export CSV</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExportHistoryExcel}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-700 text-xs font-extrabold flex items-center gap-1.5 transition"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Export Excel (.xls)</span>
                 </button>
               </div>
             </div>
