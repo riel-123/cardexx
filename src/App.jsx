@@ -1233,7 +1233,20 @@ export default function App() {
 
   const openCardDetail = (card) => setSelectedDetailCard(card);
 
-  if (connection !== 'ready') return <div className="min-h-screen bg-slate-50 text-slate-800 p-8"><h1 className="text-xl font-bold text-emerald-700">CARDEXX</h1><p className="my-4">{connection === 'loading' ? 'Memuat data dari database...' : 'Koneksi database gagal: ' + connectionError}</p>{connection === 'error' && <button className="bg-emerald-700 text-white rounded px-4 py-2" onClick={loadData}>Coba lagi</button>}</div>;
+  if (connection === 'loading') return (
+    <main role="status" aria-live="polite" aria-busy="true" style={{minHeight:'100dvh',display:'grid',placeItems:'center',background:'#f5f7f8',padding:24,textAlign:'center',color:'#065f46'}}>
+      <style>{`@keyframes cxLoadingSpin { to { transform: rotate(360deg); } } @media (prefers-reduced-motion: reduce) { .cx-loading-ring { animation: none !important; } }`}</style>
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
+        <div style={{position:'relative',width:104,height:104,display:'grid',placeItems:'center',marginBottom:8}}>
+          <div aria-hidden="true" className="cx-loading-ring" style={{position:'absolute',inset:0,border:'3px solid #d1fae5',borderTopColor:'#059669',borderRightColor:'#fbbf24',borderRadius:'50%',animation:'cxLoadingSpin 1.15s linear infinite'}} />
+          <RayquazaLogo className="w-16 h-16" />
+        </div>
+        <h1 style={{fontSize:28,fontWeight:900,letterSpacing:3,margin:0}}>CARDEXX</h1>
+        <p style={{fontSize:12,letterSpacing:2,color:'#64748b',margin:0}}>TCG WORKSPACE</p>
+      </div>
+    </main>
+  );
+  if (connection === 'error') return <div className="min-h-screen bg-slate-50 text-slate-800 p-8"><h1 className="text-xl font-bold text-emerald-700">CARDEXX</h1><p className="my-4">{'Koneksi database gagal: ' + connectionError}</p><button className="bg-emerald-700 text-white rounded px-4 py-2" onClick={loadData}>Coba lagi</button></div>;
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-emerald-500/30 selection:text-emerald-700 relative overflow-x-hidden">
       {(saving || processingPhoto) && <div className="fixed inset-0 z-[100] bg-slate-950/50 flex items-center justify-center" role="status"><span className="bg-white p-4 rounded-xl">{processingPhoto ? "Mengompres foto..." : "Menyimpan ke database..."}</span></div>}
