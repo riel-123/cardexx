@@ -412,7 +412,7 @@ export default function App() {
       gradingCompany: 'Raw',
       grade: 'Raw NM/M',
       storageLocation: 'Binder 1 - High End',
-      valuationCost: '',
+      costPercent: '70',
       targetSellPrice: '',
       imageUrl: ''
     }
@@ -423,7 +423,7 @@ export default function App() {
   const [historyTypeFilter, setHistoryTypeFilter] = useState('ALL');
   const [historyTcgFilter, setHistoryTcgFilter] = useState('ALL');
   const [historyMonthFilter, setHistoryMonthFilter] = useState('ALL');
-  const [exportMonth,setExportMonth]=useState('ALL');
+  
   const [exportStorage,setExportStorage]=useState('ALL');
 
   const [selectedDetailCard, setSelectedDetailCard] = useState(null);
@@ -537,7 +537,7 @@ export default function App() {
     const potensiProfitStok = totalEstimasiJual - totalModalStok;
 
     const totalOmzet = transactions.reduce((acc, t) => acc + (Number(t.revenue) || 0), 0);
-    const totalCostSold = transactions.reduce((acc, t) => acc + (Number(t.costBasis) || 0), 0);
+    const totalCostSold = transactions.filter(t=>t.type!=='PURCHASE').reduce((acc, t) => acc + (Number(t.costBasis) || 0), 0);
     const totalNetProfit = transactions.reduce((acc, t) => acc + (Number(t.netProfit) || 0), 0);
     const totalModalKeseluruhan = totalModalStok + totalCostSold;
 
@@ -653,7 +653,7 @@ export default function App() {
 
     const validInItems = tradeInItems.filter((item) => item.name.trim());
     const totalInValuation = validInItems.reduce(
-      (sum, item) => sum + parseDotNumber(item.valuationCost),
+      (sum, item) => sum + Math.round(parseDotNumber(item.targetSellPrice) * Number(item.costPercent ?? 70) / 100),
       0
     );
 
@@ -779,7 +779,14 @@ export default function App() {
         payload.imageUrl = await uploadPhoto(payload.imageUrl);
         setCardForm(prev => ({...prev, imageUrl: payload.imageUrl}));
       }
-      const saved = editingCard ? await api('/cards/' + encodeURIComponent(editingCard.id), 'PATCH', payload) : await api('/cards', 'POST', payload);
+      let saved;
+      if (editingCard) {
+        saved = await api('/cards/' + encodeURIComponent(editingCard.id), 'PATCH', payload);
+      } else {
+        const result = await api('/transactions/commit', 'POST', {outgoing: [], incoming: [payload], transaction: {type:'PURCHASE', tcg:payload.tcg, date: new Date().toLocaleDateString('sv-SE', {timeZone:'Asia/Jakarta'}), summary:payload.name, revenue:0, costBasis:payload.buyPrice, netProfit:0, notes:'Pembelian kartu · '+payload.storageLocation}});
+        saved = result.created[0];
+        setTransactions(prev => [result.transaction, ...prev]);
+      }
       setCards(prev => editingCard ? prev.map(c => c.id === editingCard.id ? saved : c) : [saved, ...prev]);
       showToast('Kartu berhasil disimpan ke database!');
     });
@@ -860,7 +867,7 @@ export default function App() {
         gradingCompany: 'Raw',
         grade: 'Raw NM/M',
         storageLocation: storageLocations[0] || 'Binder 1 - High End',
-        valuationCost: '',
+        costPercent: '70',
         targetSellPrice: '',
         imageUrl: ''
       }
@@ -883,9 +890,10 @@ export default function App() {
       }
 
       if (validInItems.some(item => !categories.includes(item.category) || !storageLocations.includes(item.storageLocation))) { showToast('Pilih kategori dan lokasi penyimpanan aktif untuk setiap kartu masuk.', 'error'); return; }
+      if (validInItems.some(item => parseDotNumber(item.targetSellPrice) <= 0 || !Number.isFinite(Number(item.costPercent)) || Number(item.costPercent) < 0 || Number(item.costPercent) > 100 || item.costPercent === '')) { showToast('Isi target jual dan persentase modal 0–100% untuk setiap kartu masuk.', 'error'); return; }
       const newCardsFromTrade = validInItems.map((item, idx) => {
-        const valCost = parseDotNumber(item.valuationCost);
-        const targetSell = parseDotNumber(item.targetSellPrice) || Math.round(valCost * 1.25);
+        const valCost = Math.round(parseDotNumber(item.targetSellPrice) * Number(item.costPercent ?? 70) / 100);
+        const targetSell = parseDotNumber(item.targetSellPrice);
         return {
           id: `CRD-${Date.now().toString().slice(-4)}${idx}`,
           tcg: item.tcg || 'POKEMON',
@@ -960,7 +968,7 @@ export default function App() {
           gradingCompany: 'Raw',
           grade: 'Raw NM/M',
           storageLocation: storageLocations[0] || 'Binder 1 - High End',
-          valuationCost: '',
+          costPercent: '70',
           targetSellPrice: '',
           imageUrl: ''
         }
@@ -1055,7 +1063,7 @@ export default function App() {
 
   const handleExportCSV = () => {
     try {
-      const headers = ['ID Transaksi', 'Tipe', 'Tanggal', 'Ringkasan Item', 'Omzet (IDR)', 'Modal HPP (IDR)', 'Profit Bersih (IDR)', 'Catatan'];
+      const headers = ['ID Transaksi', 'Tipe', 'Tanggal', 'Ringkasan Item', 'Omzet (IDR)', 'Modal HPP / Pembelian (IDR)', 'Profit Bersih (IDR)', 'Catatan'];
       const rows = filteredTransactions.map((t) => [
         t.id,
         t.type,
@@ -1085,7 +1093,7 @@ export default function App() {
   };
 
   const handleExportHistoryExcel = () => {
-    const exportTransactions = transactions.filter(t => exportMonth==='ALL' || String(t.date||'').slice(0,7)===exportMonth);
+    const exportTransactions = filteredTransactions;
     try {
       const headers = [
         'ID Transaksi',
@@ -1095,32 +1103,34 @@ export default function App() {
         'Ringkasan Item',
         'Omzet / Nilai (IDR)',
         'Modal HPP (IDR)',
+        'Pembelian (IDR)',
         'Profit Bersih (IDR)',
         'Catatan'
       ];
       const rows = exportTransactions.map((t) => [
         t.id,
-        t.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH',
+        t.type === 'PURCHASE' ? 'PEMBELIAN' : t.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH',
         t.tcg || 'POKEMON',
         t.date,
         t.summary || '-',
         Number(t.revenue) || 0,
-        Number(t.costBasis) || 0,
+        t.type === 'PURCHASE' ? 0 : Number(t.costBasis) || 0,
+        t.type === 'PURCHASE' ? Number(t.costBasis) || 0 : 0,
         Number(t.netProfit) || 0,
         t.notes || '-'
       ]);
 
       const totalOmzetFiltered = exportTransactions.reduce((sum, t) => sum + (Number(t.revenue) || 0), 0);
-      const totalModalFiltered = exportTransactions.reduce((sum, t) => sum + (Number(t.costBasis) || 0), 0);
+      const totalModalFiltered = exportTransactions.filter(t=>t.type!=='PURCHASE').reduce((sum, t) => sum + (Number(t.costBasis) || 0), 0);
       const totalProfitFiltered = exportTransactions.reduce((sum, t) => sum + (Number(t.netProfit) || 0), 0);
 
-      const monthSuffix = exportMonth !== 'ALL' ? `_${exportMonth}` : '';
+      const monthSuffix = historyMonthFilter !== 'ALL' ? `_${historyMonthFilter}` : '';
       const periodLabel =
-        exportMonth !== 'ALL' ? ` - ${formatMonthLabel(exportMonth)}` : ' - Semua Bulan';
+        historyMonthFilter !== 'ALL' ? ` - ${formatMonthLabel(historyMonthFilter)}` : ' - Semua Bulan';
 
       downloadExcelHtmlSheet({
-        filename: `CARDEXX_Riwayat_Laba${monthSuffix}_${new Date().toISOString().slice(0, 10)}.xls`,
-        sheetTitle: `CARDEXX Riwayat Transaksi & Laba${periodLabel}`,
+        filename: `CARDEXX_Riwayat${monthSuffix}_${new Date().toISOString().slice(0, 10)}.xls`,
+        sheetTitle: `CARDEXX Riwayat Transaksi${periodLabel}`,
         headers,
         rows,
         totalsRow: [
@@ -1131,14 +1141,15 @@ export default function App() {
           'Total Periode Terfilter',
           totalOmzetFiltered,
           totalModalFiltered,
+          exportTransactions.filter(t=>t.type==='PURCHASE').reduce((n,t)=>n+Number(t.costBasis||0),0),
           totalProfitFiltered,
           ''
         ]
       });
-      showToast('Laporan Riwayat & Laba (.xls) berhasil diunduh!');
+      showToast('Laporan Riwayat (.xls) berhasil diunduh!');
     } catch (err) {
       console.error('History Excel export error:', err);
-      showToast('Gagal mengekspor Excel Riwayat & Laba.', 'error');
+      showToast('Gagal mengekspor Excel Riwayat.', 'error');
     }
   };
 
@@ -1155,7 +1166,7 @@ export default function App() {
         'Kategori',
         'Grade / Kondisi',
         'Lokasi Penyimpanan',
-        'Modal HPP (IDR)',
+        'Modal HPP / Pembelian (IDR)',
         'Target Jual (IDR)',
         'Estimasi Profit (IDR)',
         'Status'
@@ -1308,7 +1319,7 @@ export default function App() {
       <main className="cx-main relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
         {masterError && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Mode baca saja — daftar binder dan kategori belum dapat dimuat.</strong><p className="my-2">{masterError}. Stok dan laporan tetap dapat dilihat. Penyimpanan perubahan dinonaktifkan sementara.</p><button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-white" onClick={loadData}>Coba sambungkan ulang</button></div>}
         <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan binder.'}[activeTab]}</p></div>
-        {['history','sold','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat & laba</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button></nav>}
+        {['history','sold','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button></nav>}
         {activeTab==='binders' && <section className="space-y-3">
           <select aria-label="Pilih lokasi laporan" value={binderFilter} onChange={e=>setBinderFilter(e.target.value)} className="w-full sm:w-72 px-3 py-2 rounded-xl border border-slate-200 bg-white"><option value="ALL">Semua lokasi</option>{[...new Set([...storageLocations,...cards.map(c=>c.storageLocation||'Tanpa lokasi')])].map(loc=><option key={loc}>{loc}</option>)}</select>
           <p className="text-xs text-slate-500">Laporan berdasarkan lokasi kartu yang tercatat saat ini. Nilai keluar mencakup SOLD dan trade-in; bukan omzet kas atau laba transaksi final.</p>
@@ -1320,7 +1331,7 @@ export default function App() {
           })}
         </section>}
         {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Binder <span>{storageLocations.length}</span></button></div>}
-        {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid sm:grid-cols-2 gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Riwayat</label><select aria-label="Bulan untuk ekspor riwayat" value={exportMonth} onChange={e=>setExportMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua bulan</option>{availableMonths.map(ym=><option key={ym} value={ym}>{formatMonthLabel(ym)}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportHistoryExcel}><Download className="w-4 h-4"/> Export riwayat (.xls)</button></div></div></section>}
+        {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div></div></section>}
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-4">
@@ -1789,7 +1800,7 @@ export default function App() {
                             }}
                             className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-700 hover:text-slate-950 text-[11px] font-extrabold transition"
                           >
-                            Jual
+                            Mark As Sold
                           </button>
                         </div>
                       </div>
@@ -1991,8 +2002,8 @@ export default function App() {
                       <div
                         key={card.id}
                         onClick={() => {
-                          setPosSelectedCardId(card.id);
-                          setPosDealPrice(formatDotInput(card.targetPrice));
+                          setPosSelectedCardId(isSelected ? '' : card.id);
+                          setPosDealPrice(isSelected ? '' : formatDotInput(card.targetPrice));
                         }}
                         className={`cursor-pointer p-3 rounded-xl border transition flex items-center justify-between gap-3 ${
                           isSelected
@@ -2238,11 +2249,11 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                <div className="space-y-4">
                   {tradeInItems.map((item, idx) => (
                     <div
                       key={item.tempId}
-                      className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
+                      className="min-w-0 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-3"
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-extrabold text-emerald-700">
@@ -2345,7 +2356,7 @@ export default function App() {
                         </select>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <select
                           value={item.language}
                           onChange={(e) =>
@@ -2370,39 +2381,15 @@ export default function App() {
 
                       <input aria-label="Nama set" placeholder="Nama set / ekspansi" value={item.setName} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,setName:e.target.value}:row))} className="w-full px-2 py-2 rounded-lg bg-white border border-slate-200 text-xs"/>
                       <div className="flex flex-wrap items-center gap-2"><label className="text-xs font-bold">Foto kartu<input type="file" accept="image/*" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="block w-full text-xs"/></label><label className="text-xs font-bold">Kamera<input type="file" accept="image/*" capture="environment" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="block w-full text-xs"/></label>{item.imageUrl && <><img src={item.imageUrl} alt="Foto kartu masuk" className="h-20 object-contain"/><button type="button" onClick={()=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,imageUrl:''}:row))}>Hapus foto</button></>}</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={item.valuationCost}
-                          onChange={(e) =>
-                            setTradeInItems((prev) =>
-                              prev.map((row) =>
-                                row.tempId === item.tempId
-                                  ? { ...row, valuationCost: formatDotInput(e.target.value) }
-                                  : row
-                              )
-                            )
-                          }
-                          placeholder="Valuasi / HPP"
-                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-amber-800 font-bold"
-                        />
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={item.targetSellPrice}
-                          onChange={(e) =>
-                            setTradeInItems((prev) =>
-                              prev.map((row) =>
-                                row.tempId === item.tempId
-                                  ? { ...row, targetSellPrice: formatDotInput(e.target.value) }
-                                  : row
-                              )
-                            )
-                          }
-                          placeholder="Target harga jual"
-                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-emerald-700 font-bold"
-                        />
+                      <div className="rounded-xl bg-white border border-slate-200 p-3 space-y-3">
+                        <label className="block text-xs font-semibold text-slate-700">Target harga jual
+                          <input aria-label="Target harga jual" type="text" inputMode="numeric" value={item.targetSellPrice} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,targetSellPrice:formatDotInput(e.target.value)}:row))} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-emerald-700"/>
+                        </label>
+                        <label className="block text-xs font-semibold text-slate-700">Persentase modal (%)
+                          <input type="number" min="0" max="100" step="1" value={item.costPercent ?? '70'} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,costPercent:e.target.value}:row))} className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"/>
+                        </label>
+                        <div className="flex flex-wrap gap-2">{[50,60,70,80,90,100].map(percent=><button key={percent} type="button" onClick={()=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,costPercent:String(percent)}:row))} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${Number(item.costPercent)===percent?'bg-emerald-100 border-emerald-500 text-emerald-800':'bg-white border-slate-200 text-slate-600'}`}>{percent}%</button>)}</div>
+                        <div className="grid grid-cols-2 gap-2 rounded-lg bg-emerald-50 p-3"><div className="min-w-0"><div className="text-xs text-slate-600">Modal otomatis</div><strong className="text-sm break-words">{formatIDR(Math.round(parseDotNumber(item.targetSellPrice)*Number(item.costPercent ?? 70)/100))}</strong></div><div className="min-w-0"><div className="text-xs text-slate-600">Potensi keuntungan</div><strong className="text-sm text-emerald-800 break-words">{formatIDR(parseDotNumber(item.targetSellPrice)-Math.round(parseDotNumber(item.targetSellPrice)*Number(item.costPercent ?? 70)/100))}</strong></div></div>
                       </div>
                     </div>
                   ))}
@@ -2454,6 +2441,8 @@ export default function App() {
         {/* ==================== TAB 6: RIWAYAT & LABA ==================== */}
         {activeTab === 'history' && (
           <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">{[['ALL','Semua'],['PURCHASE','Pembelian'],['SALE','Penjualan'],['TRADE_IN','Trade-in']].map(([value,label])=><button key={value} type="button" onClick={()=>setHistoryTypeFilter(value)} className={`rounded-xl border px-3 py-2 text-sm font-semibold ${historyTypeFilter===value?'bg-emerald-100 border-emerald-500 text-emerald-800':'bg-white border-slate-200 text-slate-700'}`}>{label}</button>)}<button type="button" onClick={handleOpenAddCard} className="rounded-xl bg-emerald-700 px-3 py-2 text-sm font-bold text-white">+ Pembelian</button><button type="button" onClick={()=>setActiveTab('pos')} className="rounded-xl border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700">+ Penjualan</button></div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[['Total pembelian',filteredTransactions.filter(t=>t.type==='PURCHASE').reduce((n,t)=>n+Number(t.costBasis||0),0)],['Total penjualan',filteredTransactions.filter(t=>t.type==='SALE').reduce((n,t)=>n+Number(t.revenue||0),0)],['Keuntungan transaksi',filteredTransactions.filter(t=>t.type!=='PURCHASE').reduce((n,t)=>n+Number(t.netProfit||0),0)]].map(([label,value])=><div key={label} className="rounded-xl bg-white border border-slate-200 p-3"><div className="text-xs text-slate-500">{label}</div><strong className="text-emerald-800 break-words">{formatIDR(value)}</strong></div>)}</div>
             <div className="rounded-2xl bg-white border border-slate-200 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap flex-1 items-center gap-2">
                 <div className="relative flex-1 min-w-[200px] max-w-md">
@@ -2500,6 +2489,7 @@ export default function App() {
                   className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700"
                 >
                   <option value="ALL">Semua Tipe</option>
+                  <option value="PURCHASE">Pembelian</option>
                   <option value="SALE">Penjualan (POS)</option>
                   <option value="TRADE_IN">Tukar Tambah</option>
                 </select>
@@ -2508,11 +2498,11 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
                 <button
                   type="button"
-                  onClick={handleExportCSV}
+                  onClick={handleExportHistoryExcel}
                   className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-extrabold flex items-center gap-1.5 transition"
                 >
                   <Download className="w-3.5 h-3.5 text-sky-700" />
-                  <span>Export CSV</span>
+                  <span>Export Excel (.xls)</span>
                 </button>
               </div>
             </div>
@@ -2527,7 +2517,7 @@ export default function App() {
                       <th className="py-2.5 px-3">Tipe</th>
                       <th className="py-2.5 px-3">Ringkasan Item</th>
                       <th className="py-2.5 px-3 text-right">Omzet / Nilai</th>
-                      <th className="py-2.5 px-3 text-right">Modal HPP</th>
+                      <th className="py-2.5 px-3 text-right">HPP / Pembelian</th>
                       <th className="py-2.5 px-3 text-right">Profit Bersih</th>
                     </tr>
                   </thead>
@@ -2563,7 +2553,7 @@ export default function App() {
                                   : 'bg-amber-500/15 text-amber-800'
                               }`}
                             >
-                              {trx.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH'}
+                              {trx.type === 'PURCHASE' ? 'PEMBELIAN' : trx.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH'}
                             </span>
                           </td>
                           <td className="py-2.5 px-3">
@@ -2721,7 +2711,7 @@ export default function App() {
                   className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs sm:text-sm font-extrabold flex items-center gap-2"
                 >
                   <ShoppingBag className="w-4 h-4" />
-                  <span>Jual di Kasir POS</span>
+                  <span>Mark As Sold</span>
                 </button>
               )}
             </div>
