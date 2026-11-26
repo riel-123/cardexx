@@ -648,6 +648,7 @@ export default function App() {
 
   const tradeSummary = useMemo(() => {
     const outCards = availableInventory.filter((c) => tradeOutCardIds.includes(c.id));
+    const totalOutTarget = outCards.reduce((sum,c)=>sum+(Number(c.targetPrice)||0),0);
     const totalOutCost = outCards.reduce((sum, c) => sum + (Number(c.buyPrice) || 0), 0);
 
     const validInItems = tradeInItems.filter((item) => item.name.trim());
@@ -669,6 +670,7 @@ export default function App() {
       outCards,
       validInItems,
       totalOutCost,
+      totalOutTarget,
       totalInValuation,
       cashDelta,
       tradeNetProfitImpact
@@ -892,8 +894,8 @@ export default function App() {
           number: item.number.trim() || '-',
           language: item.language,
           category: item.category,
-          gradingCompany: item.gradingCompany,
-          grade: item.grade.trim() || 'Raw NM/M',
+          gradingCompany: item.category === 'Graded Slab' ? (item.gradingCompany === 'Raw' ? 'PSA' : item.gradingCompany) : 'Raw',
+          grade: item.category === 'Graded Slab' ? (item.gradingCompany === 'Raw' ? 'PSA 10' : item.grade.trim() || `${item.gradingCompany} 10`) : item.category === 'Single Card' ? (item.gradingCompany === 'Raw' ? item.grade.trim() || 'Raw NM/M' : 'Raw NM/M') : 'Raw',
           storageLocation: item.storageLocation,
           buyPrice: valCost,
           targetPrice: targetSell,
@@ -915,7 +917,7 @@ export default function App() {
         cashDelta > 0
           ? `Toko Terima Cash ${formatIDR(cashDelta)}`
           : cashDelta < 0
-          ? `Kita Nambah Cash ${formatIDR(Math.abs(cashDelta))}`
+          ? `Toko Nambah Cash ${formatIDR(Math.abs(cashDelta))}`
           : 'Tukar Guling (0 Cash)';
 
       const newTrx = {
@@ -1305,7 +1307,7 @@ export default function App() {
       {/* Main Content Container */}
       <main className="cx-main relative z-10 max-w-7xl mx-auto px-3 sm:px-6 py-5">
         {masterError && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><strong>Mode baca saja — daftar binder dan kategori belum dapat dimuat.</strong><p className="my-2">{masterError}. Stok dan laporan tetap dapat dilihat. Penyimpanan perubahan dinonaktifkan sementara.</p><button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-white" onClick={loadData}>Coba sambungkan ulang</button></div>}
-        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan lokasi penyimpanan.'}[activeTab]}</p></div>
+        <div className="cx-page-title"><h2>{{dashboard:'Ringkasan toko',inventory:'Stok kartu',pos:'Kasir',trade:'Tukar tambah',history:'Laporan',sold:'Laporan',binders:'Laporan binder',settings:'Kelola toko'}[activeTab]}</h2><p>{{dashboard:'Pantau aset dan performa koleksi.',inventory:'Kelola koleksi Pokémon dan One Piece.',pos:'Catat penjualan kartu.',trade:'Kelola pertukaran kartu.',history:'Pantau transaksi dan laba.',sold:'Arsip kartu yang telah keluar.',binders:'Nilai aset dan kartu keluar berdasarkan lokasi.',settings:'Atur kategori dan binder.'}[activeTab]}</p></div>
         {['history','sold','binders'].includes(activeTab) && <nav className="cx-subnav" aria-label="Laporan"><button type="button" className={activeTab==='history'?'cx-current':''} onClick={()=>setActiveTab('history')}>Riwayat & laba</button><button type="button" className={activeTab==='sold'?'cx-current':''} onClick={()=>setActiveTab('sold')}>Kartu terjual ({analytics.soldCount})</button><button type="button" className={activeTab==='binders'?'cx-current':''} onClick={()=>setActiveTab('binders')}>Per binder</button></nav>}
         {activeTab==='binders' && <section className="space-y-3">
           <select aria-label="Pilih lokasi laporan" value={binderFilter} onChange={e=>setBinderFilter(e.target.value)} className="w-full sm:w-72 px-3 py-2 rounded-xl border border-slate-200 bg-white"><option value="ALL">Semua lokasi</option>{[...new Set([...storageLocations,...cards.map(c=>c.storageLocation||'Tanpa lokasi')])].map(loc=><option key={loc}>{loc}</option>)}</select>
@@ -1317,8 +1319,8 @@ export default function App() {
             return <article key={loc} className="rounded-2xl bg-white border border-slate-200 p-4"><div className="flex justify-between gap-2 items-center mb-3"><h3 className="font-bold text-slate-900">{loc}</h3><span className="text-xs text-slate-500">{active.length} aktif · {sold.length} keluar</span></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[['Modal stok',cost],['Target jual',target],['Potensi laba',target-cost],['HPP kartu keluar',outCost],['Nilai kartu keluar',out],['Selisih nilai keluar',out-outCost]].map(([label,value])=><div key={label} className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">{label}</div><div className="font-bold text-sm text-emerald-800 break-words">{formatIDR(value)}</div></div>)}</div></article>;
           })}
         </section>}
-        {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Penyimpanan <span>{storageLocations.length}</span></button></div>}
-        {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid sm:grid-cols-2 gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Riwayat &amp; laba</label><select aria-label="Bulan untuk ekspor riwayat" value={exportMonth} onChange={e=>setExportMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua bulan</option>{availableMonths.map(ym=><option key={ym} value={ym}>{formatMonthLabel(ym)}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportHistoryExcel}><Download className="w-4 h-4"/> Export riwayat (.xls)</button></div></div></section>}
+        {activeTab==='settings' && <div className="cx-settings"><button type="button" onClick={()=>setIsCategoryModalOpen(true)}><Tags className="w-5 h-5"/> Kategori <span>{categories.length}</span></button><button type="button" onClick={()=>setIsStorageModalOpen(true)}><FolderArchive className="w-5 h-5"/> Binder <span>{storageLocations.length}</span></button></div>}
+        {activeTab==='settings' && <section className="rounded-2xl bg-white border border-slate-200 p-4 mt-4 space-y-4"><h3 className="font-bold flex items-center gap-2"><FileSpreadsheet className="w-5 h-5 text-emerald-700"/> Export Excel</h3><div className="grid sm:grid-cols-2 gap-3"><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Inventory stok aktif</label><select aria-label="Lokasi untuk ekspor stok" value={exportStorage} onChange={e=>setExportStorage(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua penyimpanan</option>{storageLocations.map(loc=><option key={loc}>{loc}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportInventoryExcel}><Download className="w-4 h-4"/> Export stok (.xls)</button></div><div className="rounded-xl bg-slate-50 p-3 space-y-2"><label className="block text-sm font-bold">Riwayat</label><select aria-label="Bulan untuk ekspor riwayat" value={exportMonth} onChange={e=>setExportMonth(e.target.value)} className="w-full rounded-lg border border-slate-200 bg-white p-2"><option value="ALL">Semua bulan</option>{availableMonths.map(ym=><option key={ym} value={ym}>{formatMonthLabel(ym)}</option>)}</select><button type="button" className="cx-export-button" onClick={handleExportHistoryExcel}><Download className="w-4 h-4"/> Export riwayat (.xls)</button></div></div></section>}
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-4">
@@ -1327,7 +1329,7 @@ export default function App() {
               <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-sky-400 to-blue-500" />
                 <div className="flex items-center justify-between text-slate-600 mb-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Modal Tertahan</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Modal</span>
                   <Wallet className="w-4 h-4 text-sky-700" />
                 </div>
                 <p className="text-base sm:text-lg font-black text-slate-900">{formatIDR(analytics.totalModalStok)}</p>
@@ -1359,7 +1361,7 @@ export default function App() {
               <div className="rounded-2xl bg-white border border-slate-200 p-3.5 relative overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-emerald-400 to-lime-400" />
                 <div className="flex items-center justify-between text-slate-600 mb-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Laba Bersih Aktual</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Keuntungan</span>
                   <DollarSign className="w-4 h-4 text-emerald-700" />
                 </div>
                 <p
@@ -1398,7 +1400,7 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-11 gap-2 items-center pt-1">
                 <div className="lg:col-span-2 p-3 rounded-2xl bg-slate-50 border border-sky-500/35 relative">
                   <span className="text-[10px] font-extrabold uppercase text-sky-700 block">
-                    1. Total Modal Masuk
+                    Total Modal Masuk
                   </span>
                   <p className="text-sm font-black text-slate-900 mt-1">
                     {formatIDR(analytics.totalModalKeseluruhan)}
@@ -1415,7 +1417,7 @@ export default function App() {
                 <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="p-3 rounded-2xl bg-slate-50 border border-amber-500/35">
                     <span className="text-[10px] font-extrabold uppercase text-amber-800 block">
-                      2A. Aset di Brankas
+                      Aset di Brankas
                     </span>
                     <p className="text-xs sm:text-sm font-black text-amber-800 mt-1">
                       {formatIDR(analytics.totalModalStok)}
@@ -1434,7 +1436,7 @@ export default function App() {
 
                   <div className="p-3 rounded-2xl bg-slate-50 border border-teal-500/35">
                     <span className="text-[10px] font-extrabold uppercase text-teal-700 block">
-                      2B. Modal Terlikuidasi
+                      Modal Terlikuidasi
                     </span>
                     <p className="text-xs sm:text-sm font-black text-teal-700 mt-1">
                       {formatIDR(analytics.totalCostSold)}
@@ -1458,7 +1460,7 @@ export default function App() {
 
                 <div className="lg:col-span-3 p-3 rounded-2xl bg-slate-50 border border-emerald-500/40 space-y-1.5">
                   <span className="text-[10px] font-extrabold uppercase text-emerald-700 block">
-                    3. Kas Laba & Proyeksi
+                    Kas Laba & Proyeksi
                   </span>
                   <p
                     className={`text-sm font-black ${
@@ -1584,7 +1586,7 @@ export default function App() {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Cari nama kartu, set, nomor (mis. OP05-119 / 349/190), grade, atau binder..."
+                    placeholder="Cari nama, set, nomor, grade, atau binder..."
                     className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                   {searchQuery && (
@@ -1598,7 +1600,7 @@ export default function App() {
                   )}
                 </div>
 
-                <button type="button" className="cx-filter-toggle" aria-expanded={showFilters} onClick={()=>setShowFilters(v=>!v)}>{showFilters?'Tutup filter':'Filter lainnya'}</button>
+                <button type="button" className="cx-filter-toggle sm:hidden" aria-expanded={showFilters} onClick={()=>setShowFilters(v=>!v)}>{showFilters?'Tutup filter':'Filter lainnya'}</button>
                 <div className={`${showFilters?'grid':'hidden'} grid-cols-2 sm:grid items-center gap-2 cx-filters`}>
                   <select
                     value={filterCategory}
@@ -1664,7 +1666,7 @@ export default function App() {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3.5 cx-stock-grid">
                 {filteredCards.map((card) => {
                   const estProfit = card.targetPrice - card.buyPrice;
                   const gradingCo = card.gradingCompany || getGradingCompany(card.grade);
@@ -1713,7 +1715,7 @@ export default function App() {
                             </span>
                           </div>
 
-                          <div className="absolute top-2 right-2 flex items-center gap-1 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition">
+                          <div className="absolute top-2 right-2 items-center gap-1 hidden sm:flex sm:opacity-0 sm:group-hover:opacity-100 transition">
                             <button
                               type="button"
                               onClick={(e) => handleOpenEditCard(e, card)}
@@ -1733,7 +1735,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="p-3 space-y-2">
+                        <div className="p-2 sm:p-3 space-y-2">
                           <div>
                             <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 line-clamp-1 group-hover:text-emerald-700 transition">
                               {card.name}
@@ -1750,15 +1752,15 @@ export default function App() {
                             </p>
                           </div>
 
-                          <div className="flex items-center justify-between text-[10px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
+                          <div className="hidden sm:flex items-center justify-between text-[10px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200">
                             <span className="truncate">{card.category}</span>
                             <span className="text-emerald-700 font-bold truncate max-w-[110px]">
                               {card.storageLocation}
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                            <div className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
+                            <div className="hidden sm:block p-2 rounded-xl bg-slate-50 border border-slate-200">
                               <span className="block text-[10px] text-slate-500">Modal HPP</span>
                               <span className="text-xs font-bold text-slate-700">{formatIDR(card.buyPrice)}</span>
                             </div>
@@ -1772,7 +1774,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="px-3 pb-3 pt-1 space-y-2">
+                      <div className="hidden sm:block px-3 pb-3 pt-1 space-y-2">
                         <div className="flex items-center justify-between pt-1 border-t border-slate-200">
                           <span className="text-[10px] font-bold text-emerald-700">
                             Est. +{formatIDR(estProfit)}
@@ -2061,7 +2063,7 @@ export default function App() {
                   required
                   value={posDealPrice}
                   onChange={(e) => setPosDealPrice(formatDotInput(e.target.value))}
-                  placeholder="Contoh: 3.500.000"
+                  
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-extrabold text-amber-800 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -2074,7 +2076,7 @@ export default function App() {
                   type="text"
                   value={posNotes}
                   onChange={(e) => setPosNotes(e.target.value)}
-                  placeholder="Misal: COD Bandung / Transfer BCA"
+                  placeholder="Catatan transaksi"
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -2123,7 +2125,7 @@ export default function App() {
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
                     { id: 'STORE_RECEIVES', label: '+ Toko Terima' },
-                    { id: 'STORE_PAYS', label: '- Kita Nambah' },
+                    { id: 'STORE_PAYS', label: '- Toko Nambah' },
                     { id: 'EVEN', label: 'Tukar Guling (0)' }
                   ].map((opt) => (
                     <button
@@ -2152,7 +2154,7 @@ export default function App() {
                   disabled={tradeCashFlowType === 'EVEN'}
                   value={tradeCashFlowType === 'EVEN' ? '0' : tradeCashAmount}
                   onChange={(e) => setTradeCashAmount(formatDotInput(e.target.value))}
-                  placeholder="Contoh: 1.500.000"
+                  
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm font-extrabold text-amber-800 disabled:opacity-40 focus:outline-none focus:border-amber-400"
                 />
               </div>
@@ -2190,7 +2192,7 @@ export default function App() {
                 </div>
 
                 <p className="text-xs text-slate-500">Centang beberapa kartu sekaligus. Pilihan tetap tersimpan saat mencari kartu lain.</p>
-                {tradeSummary.outCards.length>0 && <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 space-y-1"><div className="flex items-center justify-between"><strong className="text-xs text-rose-700">{tradeSummary.outCards.length} kartu dipilih</strong><button type="button" onClick={()=>setTradeOutCardIds([])} className="text-xs text-rose-700">Hapus semua</button></div>{tradeSummary.outCards.map(c=><div key={c.id} className="flex items-center justify-between gap-2 text-xs"><span>{c.name}</span><button type="button" aria-label={`Batalkan ${c.name}`} onClick={()=>toggleTradeOutCard(c.id)}><X className="w-4 h-4"/></button></div>)}</div>}
+                {tradeSummary.outCards.length>0 && <div className="rounded-xl border border-rose-200 bg-rose-50 p-2 space-y-1"><div className="flex items-center justify-between"><strong className="text-xs text-rose-700">{tradeSummary.outCards.length} kartu dipilih</strong><button type="button" onClick={()=>setTradeOutCardIds([])} className="text-xs text-rose-700">Hapus semua</button></div>{tradeSummary.outCards.map(c=><div key={c.id} className="flex items-center justify-between gap-2 text-xs"><span>{c.name}<small className="block">Target: {formatIDR(c.targetPrice)}</small></span><button type="button" aria-label={`Batalkan ${c.name}`} onClick={()=>toggleTradeOutCard(c.id)}><X className="w-4 h-4"/></button></div>)}</div>}
                 <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                   {filteredTradeOutInventory.map((card) => {
                     const checked = tradeOutCardIds.includes(card.id);
@@ -2213,7 +2215,7 @@ export default function App() {
                           </p>
                         </div>
                         <span className="text-xs font-bold text-slate-700 shrink-0">
-                          {formatIDR(card.buyPrice)}
+                          <span className="block">Modal: {formatIDR(card.buyPrice)}</span><span className="block text-emerald-700">Target: {formatIDR(card.targetPrice)}</span>
                         </span>
                       </label>
                     );
@@ -2285,7 +2287,7 @@ export default function App() {
                               )
                             )
                           }
-                          placeholder="Nama Kartu (Mew ex / Luffy)"
+                          placeholder="Nama kartu"
                           className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900"
                         />
                         <input
@@ -2298,67 +2300,8 @@ export default function App() {
                               )
                             )
                           }
-                          placeholder="Nomor (205/165 / OP05-119)"
+                          placeholder="Nomor kartu"
                           className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2">
-                        <select
-                          value={item.language}
-                          onChange={(e) =>
-                            setTradeInItems((prev) =>
-                              prev.map((row) =>
-                                row.tempId === item.tempId ? { ...row, language: e.target.value } : row
-                              )
-                            )
-                          }
-                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
-                        >
-                          {POKEMON_LANGUAGES.map((l) => (
-                            <option key={l.code} value={l.code}>
-                              {l.code}
-                            </option>
-                          ))}
-                        </select>
-
-                        <select
-                          value={item.gradingCompany}
-                          onChange={(e) => {
-                            const co = e.target.value;
-                            setTradeInItems((prev) =>
-                              prev.map((row) =>
-                                row.tempId === item.tempId
-                                  ? {
-                                      ...row,
-                                      gradingCompany: co,
-                                      grade: co === 'Raw' ? 'Raw NM/M' : `${co} 10`
-                                    }
-                                  : row
-                              )
-                            );
-                          }}
-                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
-                        >
-                          {GRADING_COMPANIES.map((g) => (
-                            <option key={g} value={g}>
-                              {g}
-                            </option>
-                          ))}
-                        </select>
-
-                        <input
-                          type="text"
-                          value={item.grade}
-                          onChange={(e) =>
-                            setTradeInItems((prev) =>
-                              prev.map((row) =>
-                                row.tempId === item.tempId ? { ...row, grade: e.target.value } : row
-                              )
-                            )
-                          }
-                          placeholder="Grade (PSA 10 / Raw)"
-                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-900"
                         />
                       </div>
 
@@ -2368,7 +2311,7 @@ export default function App() {
                           onChange={(e) =>
                             setTradeInItems((prev) =>
                               prev.map((row) =>
-                                row.tempId === item.tempId ? { ...row, category: e.target.value } : row
+                                row.tempId === item.tempId ? { ...row, category: e.target.value, gradingCompany:e.target.value==='Graded Slab'?'PSA':'Raw', grade:e.target.value==='Graded Slab'?'PSA 10':e.target.value==='Single Card'?'Raw NM/M':'Raw' } : row
                               )
                             )
                           }
@@ -2402,6 +2345,31 @@ export default function App() {
                         </select>
                       </div>
 
+                      <div className="grid grid-cols-3 gap-2">
+                        <select
+                          value={item.language}
+                          onChange={(e) =>
+                            setTradeInItems((prev) =>
+                              prev.map((row) =>
+                                row.tempId === item.tempId ? { ...row, language: e.target.value } : row
+                              )
+                            )
+                          }
+                          className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700"
+                        >
+                          {POKEMON_LANGUAGES.map((l) => (
+                            <option key={l.code} value={l.code}>
+                              {l.code}
+                            </option>
+                          ))}
+                        </select>
+
+                        {item.category === 'Graded Slab' && <><select aria-label="Jenis grading" value={item.gradingCompany === 'Raw' ? 'PSA' : item.gradingCompany} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,gradingCompany:e.target.value,grade:e.target.value+' 10'}:row))} className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs">{GRADING_COMPANIES.filter(g=>g!=='Raw').map(g=><option key={g}>{g}</option>)}</select><input aria-label="Skor grading" placeholder="Skor grading" value={item.gradingCompany==='Raw'?'PSA 10':item.grade} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,gradingCompany:row.gradingCompany==='Raw'?'PSA':row.gradingCompany,grade:e.target.value}:row))} className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs"/></>}
+                        {item.category === 'Single Card' && <select aria-label="Kondisi kartu" value={['Raw NM/M','Raw LP','Raw MP','Raw HP','Raw DMG'].includes(item.grade)?item.grade:'Raw NM/M'} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,gradingCompany:'Raw',grade:e.target.value}:row))} className="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-xs">{['Raw NM/M','Raw LP','Raw MP','Raw HP','Raw DMG'].map(g=><option key={g}>{g}</option>)}</select>}
+                      </div>
+
+                      <input aria-label="Nama set" placeholder="Nama set / ekspansi" value={item.setName} onChange={e=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,setName:e.target.value}:row))} className="w-full px-2 py-2 rounded-lg bg-white border border-slate-200 text-xs"/>
+                      <div className="flex flex-wrap items-center gap-2"><label className="text-xs font-bold">Foto kartu<input type="file" accept="image/*" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="block w-full text-xs"/></label><label className="text-xs font-bold">Kamera<input type="file" accept="image/*" capture="environment" onChange={e=>handleImageFileUpload(e,'TRADE_IN',item.tempId)} className="block w-full text-xs"/></label>{item.imageUrl && <><img src={item.imageUrl} alt="Foto kartu masuk" className="h-20 object-contain"/><button type="button" onClick={()=>setTradeInItems(prev=>prev.map(row=>row.tempId===item.tempId?{...row,imageUrl:''}:row))}>Hapus foto</button></>}</div>
                       <div className="grid grid-cols-2 gap-2">
                         <input
                           type="text"
@@ -2416,7 +2384,7 @@ export default function App() {
                               )
                             )
                           }
-                          placeholder="Valuasi Deal / Jadi HPP (mis. 2.000.000)"
+                          placeholder="Valuasi / HPP"
                           className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-amber-800 font-bold"
                         />
                         <input
@@ -2432,7 +2400,7 @@ export default function App() {
                               )
                             )
                           }
-                          placeholder="Target Harga Jual (mis. 2.500.000)"
+                          placeholder="Target harga jual"
                           className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-emerald-700 font-bold"
                         />
                       </div>
@@ -2450,6 +2418,7 @@ export default function App() {
                   Modal Kartu Keluar:{' '}
                   <span className="font-bold text-rose-700">{formatIDR(tradeSummary.totalOutCost)}</span>
                 </p>
+                <div className="text-xs space-y-1 border-t border-slate-200 pt-2"><p>Total target kartu keluar: <strong>{formatIDR(tradeSummary.totalOutTarget)}</strong></p><p>Potensi laba jika dijual sesuai target: <strong>{formatIDR(tradeSummary.totalOutTarget-tradeSummary.totalOutCost)}</strong></p><p>Nilai tukar efektif (valuasi masuk + kas bersih): <strong>{formatIDR(tradeSummary.totalInValuation+tradeSummary.cashDelta)}</strong></p><p>Selisih terhadap target jual: <strong>{formatIDR(tradeSummary.totalInValuation+tradeSummary.cashDelta-tradeSummary.totalOutTarget)}</strong></p></div>
                 <p className="text-xs sm:text-sm font-extrabold text-slate-900">
                   Dampak Laba Bersih Trade-In:{' '}
                   <span
@@ -2739,6 +2708,7 @@ export default function App() {
                 </button>
               </div>
 
+              {selectedDetailCard.status === 'IN_STOCK' && <button type="button" className="sm:hidden text-xs font-bold text-rose-700" onClick={e=>{handleDeleteCard(e, selectedDetailCard.id);setSelectedDetailCard(null);}}>Hapus kartu</button>}
               {selectedDetailCard.status === 'IN_STOCK' && (
                 <button
                   type="button"
@@ -2820,11 +2790,7 @@ export default function App() {
                   required
                   value={cardForm.name}
                   onChange={(e) => setCardForm({ ...cardForm, name: e.target.value })}
-                  placeholder={
-                    cardForm.tcg === 'ONE_PIECE'
-                      ? 'Contoh: Monkey D. Luffy Manga Rare / Nami SP'
-                      : 'Contoh: Charizard ex SAR / Umbreon VMAX Alt Art'
-                  }
+                  
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -2838,11 +2804,7 @@ export default function App() {
                   type="text"
                   value={cardForm.setName}
                   onChange={(e) => setCardForm({ ...cardForm, setName: e.target.value })}
-                  placeholder={
-                    cardForm.tcg === 'ONE_PIECE'
-                      ? 'Contoh: Awakening of the New Era (OP-05)'
-                      : 'Contoh: Shiny Treasure ex (sv4a)'
-                  }
+                  
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 />
               </div>
@@ -2853,7 +2815,7 @@ export default function App() {
                   type="text"
                   value={cardForm.number}
                   onChange={(e) => setCardForm({ ...cardForm, number: e.target.value })}
-                  placeholder={cardForm.tcg === 'ONE_PIECE' ? 'Contoh: OP05-119' : 'Contoh: 349/190'}
+                  
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 />
               </div>
@@ -2976,7 +2938,7 @@ export default function App() {
                   type="text"
                   value={cardForm.grade}
                   onChange={(e) => setCardForm({ ...cardForm, grade: e.target.value })}
-                  placeholder="Misal: PSA 10, BGS 9.5, atau Raw NM/M"
+                  placeholder="Skor grading"
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm text-slate-900"
                 />
               </div>
@@ -3007,7 +2969,7 @@ export default function App() {
                     onChange={(e) =>
                       setCardForm({ ...cardForm, buyPrice: formatDotInput(e.target.value) })
                     }
-                    placeholder="2.500.000"
+                    
                     className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-900"
                   />
                 </div>
@@ -3029,7 +2991,7 @@ export default function App() {
                     onChange={(e) =>
                       setCardForm({ ...cardForm, targetPrice: formatDotInput(e.target.value) })
                     }
-                    placeholder="3.250.000"
+                    
                     className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-emerald-700 font-bold"
                   />
                 </div>
@@ -3124,7 +3086,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
                 <FolderArchive className="w-4 h-4 text-emerald-700" />
-                <span>Lokasi Penyimpanan Fisik</span>
+                <span>Binder</span>
               </h2>
               <button
                 type="button"
