@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -435,8 +435,8 @@ const INITIAL_TRANSACTIONS = [
 export default function App() {
   // Navigation & Core State
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [cards, setCards] = useState(INITIAL_CARDS);
-  const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
+  const [cards, setCards] = useState([]);
+  const [transactions, setTransactions] = useState([]);
 
   // Master Data: Categories & Storage Locations
   const [categories, setCategories] = useState(['Single Card', 'Graded Slab', 'Sealed Box', 'Booster Pack']);
@@ -541,6 +541,37 @@ export default function App() {
     setTimeout(() => {
       setToast((prev) => (prev?.message === message ? null : prev));
     }, 3200);
+  };
+
+  const [connection, setConnection] = useState('loading');
+  const [connectionError, setConnectionError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const lock = useRef(false);
+  const api = async (path, method = 'GET', body) => {
+    const base = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+    if (!base) throw new Error('VITE_API_URL belum dikonfigurasi');
+    const response = await fetch(base + path, { method, ...(body === undefined ? {} : {headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)}), cache: 'no-store' });
+    if (!response.ok) throw new Error(`API ${response.status}: ${path}`);
+    return response.json();
+  };
+  const loadData = async () => {
+    setConnection('loading');
+    try {
+      const [loadedCards, loadedTransactions] = await Promise.all([api('/cards'), api('/transactions')]);
+      if (!Array.isArray(loadedCards) || !Array.isArray(loadedTransactions)) throw new Error('Format respons API tidak valid');
+      setCards(loadedCards); setTransactions(loadedTransactions);
+      setCategories(prev => [...new Set([...prev, ...loadedCards.map(c => c.category).filter(Boolean)])]);
+      setStorageLocations(prev => [...new Set([...prev, ...loadedCards.map(c => c.storageLocation).filter(Boolean)])]);
+      setConnection('ready');
+    } catch (error) { setConnectionError(error.message); setConnection('error'); }
+  };
+  useEffect(() => { loadData(); }, []);
+  const persist = async (action) => {
+    if (lock.current || connection !== 'ready') return false;
+    lock.current = true; setSaving(true);
+    try { await action(); return true; }
+    catch (error) { showToast('Gagal menyimpan: ' + error.message, 'error'); return false; }
+    finally { lock.current = false; setSaving(false); }
   };
 
   // --- ANALYTICS & DERIVED DATA ---
@@ -858,7 +889,7 @@ export default function App() {
     setIsCardModalOpen(true);
   };
 
-  const handleSaveCard = (e) => {
+  const handleSaveCard = async (e) => {
     e.preventDefault();
     if (!cardForm.name.trim()) {
       showToast('Nama kartu wajib diisi.', 'error');
@@ -880,30 +911,27 @@ export default function App() {
       imageUrl: cardForm.imageUrl.trim()
     };
 
-    if (editingCard) {
-      setCards((prev) => prev.map((c) => (c.id === editingCard.id ? { ...c, ...payload } : c)));
-      showToast(`Kartu "${payload.name}" berhasil diperbarui!`);
-    } else {
-      const newCard = {
-        id: `CRD-${Date.now().toString().slice(-5)}`,
-        ...payload,
-        soldPrice: null,
-        status: 'IN_STOCK'
-      };
-      setCards((prev) => [newCard, ...prev]);
-      showToast(`Kartu "${payload.name}" ditambahkan ke inventory!`);
-    }
+    const ok = await persist(async () => {
+      const saved = editingCard ? await api('/cards/' + encodeURIComponent(editingCard.id), 'PATCH', payload) : await api('/cards', 'POST', payload);
+      setCards(prev => editingCard ? prev.map(c => c.id === editingCard.id ? saved : c) : [saved, ...prev]);
+      showToast('Kartu berhasil disimpan ke database!');
+    });
+    if (!ok) return;
     setIsCardModalOpen(false);
   };
 
-  const handleDeleteCard = (e, cardId) => {
+  const handleDeleteCard = async (e, cardId) => {
     if (e) e.stopPropagation();
-    setCards((prev) => prev.filter((c) => c.id !== cardId));
-    showToast('Kartu dihapus dari inventory.');
+    if (!window.confirm('Hapus kartu ini dari database?')) return;
+    await persist(async () => {
+      await api('/cards/' + encodeURIComponent(cardId), 'DELETE');
+      setCards(prev => prev.filter(c => c.id !== cardId));
+      showToast('Kartu dihapus dari database.');
+    });
   };
 
   // --- POS SALE HANDLER ---
-  const handleCompleteSale = (e) => {
+  const handleCompleteSale = async (e) => {
     e.preventDefault();
     if (!selectedPosCard) {
       showToast('Pilih kartu terlebih dahulu.', 'error');
@@ -918,12 +946,6 @@ export default function App() {
     const cost = Number(selectedPosCard.buyPrice) || 0;
     const profit = deal - cost;
 
-    setCards((prev) =>
-      prev.map((c) =>
-        c.id === selectedPosCard.id ? { ...c, status: 'SOLD', soldPrice: deal } : c
-      )
-    );
-
     const newTrx = {
       id: `TRX-${Date.now().toString().slice(-5)}`,
       type: 'SALE',
@@ -936,7 +958,13 @@ export default function App() {
       notes: posNotes.trim()
     };
 
-    setTransactions((prev) => [newTrx, ...prev]);
+    const ok = await persist(async () => {
+      const { id, ...transaction } = newTrx;
+      const result = await api('/transactions/commit', 'POST', { outgoing: [{id: selectedPosCard.id, soldPrice: deal}], incoming: [], transaction });
+      setCards(prev => prev.map(c => result.updated.find(x => x.id === c.id) || c));
+      setTransactions(prev => [result.transaction, ...prev]);
+    });
+    if (!ok) return;
     setPosSelectedCardId('');
     setPosDealPrice('');
     setPosNotes('');
@@ -976,7 +1004,7 @@ export default function App() {
     setTradeInItems((prev) => prev.filter((r) => r.tempId !== tempId));
   };
 
-  const handleExecuteTradeIn = (e) => {
+  const handleExecuteTradeIn = async (e) => {
     e.preventDefault();
     try {
       const { outCards, validInItems, totalOutCost, totalInValuation, cashDelta, tradeNetProfitImpact } =
@@ -1009,15 +1037,6 @@ export default function App() {
         };
       });
 
-      setCards((prev) => {
-        const updated = prev.map((c) =>
-          tradeOutCardIds.includes(c.id)
-            ? { ...c, status: 'SOLD', soldPrice: Number(c.buyPrice) || 0 }
-            : c
-        );
-        return [...newCardsFromTrade, ...updated];
-      });
-
       const outNames = outCards.map((c) => c.name).join(', ') || 'Tidak ada';
       const inNames = validInItems.map((c) => c.name).join(', ') || 'Tidak ada';
       const allTcgSet = new Set([
@@ -1045,7 +1064,14 @@ export default function App() {
         notes: [cashNote, tradeNotes.trim()].filter(Boolean).join(' • ')
       };
 
-      setTransactions((prev) => [newTrx, ...prev]);
+      const ok = await persist(async () => {
+        const { id, ...transaction } = newTrx;
+        const incoming = newCardsFromTrade.map(({id, ...card}) => card);
+        const result = await api('/transactions/commit', 'POST', { outgoing: outCards.map(c => ({id:c.id,soldPrice:c.buyPrice})), incoming, transaction });
+        setCards(prev => [...result.created, ...prev.map(c => result.updated.find(x => x.id === c.id) || c)]);
+        setTransactions(prev => [result.transaction, ...prev]);
+      });
+      if (!ok) return;
       setTradeOutCardIds([]);
       setTradeCashAmount('');
       setTradeNotes('');
@@ -1437,8 +1463,10 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
     }
   };
 
+  if (connection !== 'ready') return <div className="min-h-screen bg-slate-950 text-slate-100 p-8"><h1 className="text-xl font-bold text-emerald-300">CARDEXX</h1><p className="my-4">{connection === 'loading' ? 'Memuat data dari database...' : 'Koneksi database gagal: ' + connectionError}</p>{connection === 'error' && <button className="bg-emerald-600 rounded px-4 py-2" onClick={loadData}>Coba lagi</button>}</div>;
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/30 selection:text-emerald-200 relative overflow-x-hidden">
+      {saving && <div className="fixed inset-0 z-[100] bg-slate-950/60 flex items-center justify-center" role="status"><span className="bg-slate-900 p-4 rounded-xl">Menyimpan ke database...</span></div>}
       {/* Ambient Emerald & Gold Sky Vault Glow */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-32 -left-24 w-96 h-96 rounded-full bg-emerald-500/10 blur-3xl" />
