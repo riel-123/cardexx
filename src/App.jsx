@@ -6,7 +6,6 @@ import {
   ShoppingBag,
   ArrowLeftRight,
   History,
-  Server,
   Plus,
   Search,
   X,
@@ -16,7 +15,7 @@ import {
   Camera,
   Image as ImageIcon,
   Download,
-  Copy,
+  FileSpreadsheet,
   Share2,
   Sparkles,
   RefreshCw,
@@ -29,16 +28,14 @@ import {
   Layers,
   FolderArchive,
   Tags,
-  Database,
-  GitBranch,
-  Globe,
   TrendingDown,
   Flame,
   ArrowRight,
   BarChart3,
   ShieldAlert,
   Target,
-  Radar
+  Radar,
+  Calendar
 } from 'lucide-react';
 
 // --- CUSTOM RAYQUAZA VECTOR LOGO ---
@@ -123,6 +120,107 @@ const formatIDR = (num) => {
     currency: 'IDR',
     maximumFractionDigits: 0
   }).format(val);
+};
+
+const formatMonthLabel = (ym) => {
+  if (!ym || !/^\d{4}-\d{2}$/.test(ym)) return ym || '-';
+  const [yearStr, monthStr] = ym.split('-');
+  const dateObj = new Date(Number(yearStr), Number(monthStr) - 1, 1);
+  return new Intl.DateTimeFormat('id-ID', {
+    month: 'long',
+    year: 'numeric'
+  }).format(dateObj);
+};
+
+const escapeHtmlCell = (val) =>
+  String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const downloadExcelHtmlSheet = ({ filename, sheetTitle, headers, rows, totalsRow }) => {
+  const headerCells = headers
+    .map(
+      (h) =>
+        `<th style="background:#064e3b;color:#ffffff;border:1px solid #1e293b;padding:8px;font-weight:bold;text-align:left;">${escapeHtmlCell(
+          h
+        )}</th>`
+    )
+    .join('');
+
+  const bodyRows = rows
+    .map((row) => {
+      const cells = row
+        .map((cell, idx) => {
+          const isNumeric = typeof cell === 'number';
+          const align = isNumeric ? 'right' : 'left';
+          const formattedVal = isNumeric ? cell.toLocaleString('id-ID') : escapeHtmlCell(cell);
+          return `<td style="border:1px solid #cbd5e1;padding:6px 8px;text-align:${align};${
+            idx === 0 ? 'font-weight:bold;' : ''
+          }">${formattedVal}</td>`;
+        })
+        .join('');
+      return `<tr>${cells}</tr>`;
+    })
+    .join('');
+
+  const totalCells = totalsRow
+    ? `<tr>${totalsRow
+        .map((cell, idx) => {
+          const isNumeric = typeof cell === 'number';
+          const align = isNumeric ? 'right' : 'left';
+          const formattedVal = isNumeric ? cell.toLocaleString('id-ID') : escapeHtmlCell(cell);
+          return `<td style="background:#fef3c7;color:#0f172a;border:1px solid #94a3b8;padding:7px 8px;font-weight:bold;text-align:${align};${
+            idx === 0 ? '' : ''
+          }">${formattedVal}</td>`;
+        })
+        .join('')}</tr>`
+    : '';
+
+  const htmlWorkbook = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8" />
+  <xml>
+    <x:ExcelWorkbook>
+      <x:ExcelWorksheets>
+        <x:ExcelWorksheet>
+          <x:Name>${escapeHtmlCell(sheetTitle.slice(0, 31))}</x:Name>
+          <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+        </x:ExcelWorksheet>
+      </x:ExcelWorksheets>
+    </x:ExcelWorkbook>
+  </xml>
+</head>
+<body>
+  <table>
+    <thead>
+      <tr>
+        <th colspan="${headers.length}" style="font-size:14px;font-weight:bold;text-align:left;padding:6px 4px;color:#064e3b;">
+          ${escapeHtmlCell(sheetTitle)}
+        </th>
+      </tr>
+      <tr>${headerCells}</tr>
+    </thead>
+    <tbody>
+      ${bodyRows}
+      ${totalCells}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+  const blob = new Blob(['\ufeff', htmlWorkbook], {
+    type: 'application/vnd.ms-excel;charset=utf-8;'
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 const formatDotInput = (val) => {
@@ -395,13 +493,14 @@ export default function App() {
   const [historySearch, setHistorySearch] = useState('');
   const [historyTypeFilter, setHistoryTypeFilter] = useState('ALL');
   const [historyTcgFilter, setHistoryTcgFilter] = useState('ALL');
+  const [historyMonthFilter, setHistoryMonthFilter] = useState('ALL');
 
-  // Monthly Profit Goal State (Feature #3)
+  // Monthly Profit Goal State
   const [monthlyProfitGoal, setMonthlyProfitGoal] = useState(10000000);
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [goalInputDraft, setGoalInputDraft] = useState('10.000.000');
 
-  // Batch Market Scan State (Feature #4)
+  // Batch Market Scan State
   const [isBatchScanning, setIsBatchScanning] = useState(false);
 
   // Modals & Market Intel State
@@ -478,7 +577,6 @@ export default function App() {
       };
     });
 
-    // Analisis & Saran Jual Cepat (Market Trend & Margin Watch)
     const sellRecommendations = inStock
       .map((card) => {
         const cached = marketCache[card.id];
@@ -486,63 +584,62 @@ export default function App() {
         const target = Number(card.targetPrice) || 0;
         const marginPct = buy > 0 ? Math.round(((target - buy) / buy) * 100) : 0;
 
-        // Deteksi sinyal penurunan dari hasil live market cache atau margin tipis / tren koreksi set
         const verdictText = (cached?.verdict || '').toLowerCase();
         const hasLiveDropSignal =
-        verdictText.includes('turun') ||
-        verdictText.includes('koreksi') ||
-        verdictText.includes('di bawah') ||
-        verdictText.includes('lebih rendah');
+          verdictText.includes('turun') ||
+          verdictText.includes('koreksi') ||
+          verdictText.includes('di bawah') ||
+          verdictText.includes('lebih rendah');
 
-      const hasLiveSurgeSignal =
-        verdictText.includes('naik') ||
-        verdictText.includes('melonjak') ||
-        verdictText.includes('di atas') ||
-        verdictText.includes('menguat');
+        const hasLiveSurgeSignal =
+          verdictText.includes('naik') ||
+          verdictText.includes('melonjak') ||
+          verdictText.includes('di atas') ||
+          verdictText.includes('menguat');
 
-      let trendDropPct = 0;
-      let reason = '';
-      let urgency = 'WATCH'; // HIGH | MEDIUM | SURGE | WATCH
+        let trendDropPct = 0;
+        let reason = '';
+        let urgency = 'WATCH';
 
-      if (hasLiveDropSignal) {
-        trendDropPct = -12;
-        reason = 'Data pasar terbaru menunjukkan harga listing kompetitor mulai terkoreksi di bawah target.';
-        urgency = 'HIGH';
-      } else if (hasLiveSurgeSignal) {
-        trendDropPct = 14;
-        reason = 'Permintaan pasar sedang menguat! Anda berpeluang menaikkan harga target jual.';
-        urgency = 'SURGE';
-      } else if (marginPct <= 22) {
-        trendDropPct = -8;
-        reason = `Spread margin tipis (+${marginPct}%). Segera lepas agar modal cepat berputar sebelum pasar melemah.`;
-        urgency = 'HIGH';
-      } else if (card.id === 'CRD-104' || card.id === 'CRD-105') {
-        trendDropPct = -6;
-        reason = 'Set terbaru (sv8 / OP-08) rawan koreksi pasca-rilis; amankan profit sebelum suplai bertambah.';
-        urgency = 'MEDIUM';
-      } else {
-        trendDropPct = 4;
-        reason = `Harga relatif stabil dengan proyeksi margin sehat (+${marginPct}%).`;
-        urgency = 'WATCH';
-      }
+        if (hasLiveDropSignal) {
+          trendDropPct = -12;
+          reason = 'Data pasar terbaru menunjukkan harga listing kompetitor mulai terkoreksi di bawah target.';
+          urgency = 'HIGH';
+        } else if (hasLiveSurgeSignal) {
+          trendDropPct = 14;
+          reason = 'Permintaan pasar sedang menguat! Anda berpeluang menaikkan harga target jual.';
+          urgency = 'SURGE';
+        } else if (marginPct <= 22) {
+          trendDropPct = -8;
+          reason = `Spread margin tipis (+${marginPct}%). Segera lepas agar modal cepat berputar sebelum pasar melemah.`;
+          urgency = 'HIGH';
+        } else if (card.id === 'CRD-104' || card.id === 'CRD-105') {
+          trendDropPct = -6;
+          reason = 'Set terbaru (sv8 / OP-08) rawan koreksi pasca-rilis; amankan profit sebelum suplai bertambah.';
+          urgency = 'MEDIUM';
+        } else {
+          trendDropPct = 4;
+          reason = `Harga relatif stabil dengan proyeksi margin sehat (+${marginPct}%).`;
+          urgency = 'WATCH';
+        }
 
-      const suggestedFastSellPrice =
-        urgency === 'SURGE'
-          ? Math.round((target * 1.1) / 10000) * 10000
-          : Math.round((buy + (target - buy) * 0.65) / 10000) * 10000;
+        const suggestedFastSellPrice =
+          urgency === 'SURGE'
+            ? Math.round((target * 1.1) / 10000) * 10000
+            : Math.round((buy + (target - buy) * 0.65) / 10000) * 10000;
 
-      return {
-        card,
-        marginPct,
-        trendDropPct,
-        reason,
-        urgency,
-        suggestedFastSellPrice,
-        hasLiveCache: Boolean(cached)
-      };
-    })
-    .filter((item) => item.urgency === 'HIGH' || item.urgency === 'MEDIUM' || item.urgency === 'SURGE')
-    .sort((a, b) => a.trendDropPct - b.trendDropPct);
+        return {
+          card,
+          marginPct,
+          trendDropPct,
+          reason,
+          urgency,
+          suggestedFastSellPrice,
+          hasLiveCache: Boolean(cached)
+        };
+      })
+      .filter((item) => item.urgency === 'HIGH' || item.urgency === 'MEDIUM' || item.urgency === 'SURGE')
+      .sort((a, b) => a.trendDropPct - b.trendDropPct);
 
     const goalProgressPct =
       monthlyProfitGoal > 0
@@ -665,16 +762,30 @@ export default function App() {
     };
   }, [availableInventory, tradeOutCardIds, tradeInItems, tradeCashFlowType, tradeCashAmount]);
 
+  const availableMonths = useMemo(() => {
+    const monthSet = new Set();
+    transactions.forEach((t) => {
+      if (t.date && /^\d{4}-\d{2}/.test(t.date)) {
+        monthSet.add(t.date.slice(0, 7));
+      }
+    });
+    return Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+  }, [transactions]);
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       if (historyTypeFilter !== 'ALL' && t.type !== historyTypeFilter) return false;
       const trxTcg = t.tcg || 'POKEMON';
       if (historyTcgFilter !== 'ALL' && trxTcg !== historyTcgFilter) return false;
+      if (historyMonthFilter !== 'ALL') {
+        const trxMonth = (t.date || '').slice(0, 7);
+        if (trxMonth !== historyMonthFilter) return false;
+      }
       if (!historySearch.trim()) return true;
       const q = historySearch.toLowerCase();
       return `${t.id} ${t.summary} ${t.date} ${t.notes || ''} ${trxTcg}`.toLowerCase().includes(q);
     });
-  }, [transactions, historySearch, historyTypeFilter, historyTcgFilter]);
+  }, [transactions, historySearch, historyTypeFilter, historyTcgFilter, historyMonthFilter]);
 
   // --- MOBILE DEEP LINK / WEB LAUNCHER ---
   const handleOpenMarketApp = (e, platform, card) => {
@@ -1061,7 +1172,8 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `CARDEXX_Laporan_${new Date().toISOString().slice(0, 10)}.csv`);
+      const monthSuffix = historyMonthFilter !== 'ALL' ? `_${historyMonthFilter}` : '';
+      link.setAttribute('download', `CARDEXX_Laporan${monthSuffix}_${new Date().toISOString().slice(0, 10)}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1070,6 +1182,132 @@ export default function App() {
     } catch (err) {
       console.error('CSV export error:', err);
       showToast('Gagal mengekspor CSV.', 'error');
+    }
+  };
+
+  const handleExportHistoryExcel = () => {
+    try {
+      const headers = [
+        'ID Transaksi',
+        'Tipe',
+        'TCG',
+        'Tanggal',
+        'Ringkasan Item',
+        'Omzet / Nilai (IDR)',
+        'Modal HPP (IDR)',
+        'Profit Bersih (IDR)',
+        'Catatan'
+      ];
+      const rows = filteredTransactions.map((t) => [
+        t.id,
+        t.type === 'SALE' ? 'PENJUALAN' : 'TUKAR TAMBAH',
+        t.tcg || 'POKEMON',
+        t.date,
+        t.summary || '-',
+        Number(t.revenue) || 0,
+        Number(t.costBasis) || 0,
+        Number(t.netProfit) || 0,
+        t.notes || '-'
+      ]);
+
+      const totalOmzetFiltered = filteredTransactions.reduce((sum, t) => sum + (Number(t.revenue) || 0), 0);
+      const totalModalFiltered = filteredTransactions.reduce((sum, t) => sum + (Number(t.costBasis) || 0), 0);
+      const totalProfitFiltered = filteredTransactions.reduce((sum, t) => sum + (Number(t.netProfit) || 0), 0);
+
+      const monthSuffix = historyMonthFilter !== 'ALL' ? `_${historyMonthFilter}` : '';
+      const periodLabel =
+        historyMonthFilter !== 'ALL' ? ` - ${formatMonthLabel(historyMonthFilter)}` : ' - Semua Bulan';
+
+      downloadExcelHtmlSheet({
+        filename: `CARDEXX_Riwayat_Laba${monthSuffix}_${new Date().toISOString().slice(0, 10)}.xls`,
+        sheetTitle: `CARDEXX Riwayat Transaksi & Laba${periodLabel}`,
+        headers,
+        rows,
+        totalsRow: [
+          'TOTAL',
+          `${filteredTransactions.length} Trx`,
+          '',
+          '',
+          'Total Periode Terfilter',
+          totalOmzetFiltered,
+          totalModalFiltered,
+          totalProfitFiltered,
+          ''
+        ]
+      });
+      showToast('Laporan Riwayat & Laba (.xls) berhasil diunduh!');
+    } catch (err) {
+      console.error('History Excel export error:', err);
+      showToast('Gagal mengekspor Excel Riwayat & Laba.', 'error');
+    }
+  };
+
+  const handleExportInventoryExcel = () => {
+    try {
+      const headers = [
+        'ID Kartu',
+        'TCG',
+        'Nama Kartu',
+        'Set / Ekspansi',
+        'Nomor Kartu',
+        'Bahasa',
+        'Kategori',
+        'Grade / Kondisi',
+        'Lokasi Penyimpanan',
+        'Modal HPP (IDR)',
+        'Target Jual (IDR)',
+        'Estimasi Profit (IDR)',
+        'Status'
+      ];
+      const rows = filteredCards.map((c) => {
+        const buy = Number(c.buyPrice) || 0;
+        const target = Number(c.targetPrice) || 0;
+        return [
+          c.id,
+          getTcgMeta(c.tcg).label,
+          c.name,
+          c.setName || '-',
+          c.number || '-',
+          `${c.language} (${getLanguageLabel(c.language)})`,
+          c.category || '-',
+          c.grade || '-',
+          c.storageLocation || '-',
+          buy,
+          target,
+          target - buy,
+          c.status === 'IN_STOCK' ? 'STOK AKTIF' : 'TERJUAL'
+        ];
+      });
+
+      const totalBuy = filteredCards.reduce((sum, c) => sum + (Number(c.buyPrice) || 0), 0);
+      const totalTarget = filteredCards.reduce((sum, c) => sum + (Number(c.targetPrice) || 0), 0);
+      const totalEstProfit = totalTarget - totalBuy;
+
+      downloadExcelHtmlSheet({
+        filename: `CARDEXX_Inventory_Stok_${new Date().toISOString().slice(0, 10)}.xls`,
+        sheetTitle: `CARDEXX Inventory Stok Aktif (${filteredCards.length} Kartu)`,
+        headers,
+        rows,
+        totalsRow: [
+          'TOTAL',
+          '',
+          `${filteredCards.length} Kartu`,
+          '',
+          '',
+          '',
+          '',
+          '',
+          'Total Inventory',
+          totalBuy,
+          totalTarget,
+          totalEstProfit,
+          'IN_STOCK'
+        ]
+      });
+      showToast('Data Inventory (.xls) berhasil diunduh!');
+    } catch (err) {
+      console.error('Inventory Excel export error:', err);
+      showToast('Gagal mengekspor Excel Inventory.', 'error');
     }
   };
 
@@ -1184,7 +1422,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
     fetchMarketIntelligence(card, false);
   };
 
-  // --- BATCH SCAN ALL ACTIVE INVENTORY MARKET INTEL (Feature #4) ---
+  // --- BATCH SCAN ALL ACTIVE INVENTORY MARKET INTEL ---
   const handleScanAllMarket = async () => {
     if (isBatchScanning || availableInventory.length === 0) return;
     setIsBatchScanning(true);
@@ -1290,8 +1528,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               { id: 'sold', label: `Sold (${analytics.soldCount})`, icon: Archive },
               { id: 'pos', label: 'Kasir / Jual', icon: ShoppingBag },
               { id: 'trade', label: 'Tukar Tambah', icon: ArrowLeftRight },
-              { id: 'history', label: 'Riwayat & Laba', icon: History },
-              { id: 'architecture', label: 'NestJS & Vercel', icon: Server }
+              { id: 'history', label: 'Riwayat & Laba', icon: History }
             ].map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
@@ -1320,44 +1557,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 1: DASHBOARD ==================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-4">
-            {/* Compact Hero Summary */}
-            <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-emerald-950/40 to-slate-900 border border-emerald-500/25 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-slate-950/90 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                  <RayquazaLogo className="w-8 h-8" />
-                </div>
-                <div>
-                  <h2 className="text-sm sm:text-base font-extrabold text-white">
-                    Financial Command & Market Radar CARDEXX
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    {analytics.pokemonCount} Pokémon • {analytics.onePieceCount} One Piece • {storageLocations.length} lokasi •{' '}
-                    <span className="text-amber-300 font-semibold">
-                      {analytics.sellRecommendations.length} kartu disarankan segera jual
-                    </span>
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('pos')}
-                  className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition"
-                >
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  <span>Buka Kasir</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('trade')}
-                  className="px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition"
-                >
-                  <ArrowLeftRight className="w-3.5 h-3.5" />
-                  <span>Tukar Tambah</span>
-                </button>
-              </div>
-            </div>
-
             {/* 4 Compact KPI Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 relative overflow-hidden">
@@ -1410,7 +1609,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            {/* FEATURE #3: MONTHLY PROFIT GOAL TRACKER */}
+            {/* MONTHLY PROFIT GOAL TRACKER */}
             <div className="rounded-2xl bg-slate-900/85 border border-emerald-500/25 p-4 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -1514,9 +1713,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 </span>
               </div>
 
-              {/* Visual Flowchart Diagram */}
               <div className="grid grid-cols-1 lg:grid-cols-11 gap-2 items-center pt-1">
-                {/* Node 1: Total Capital Deployed */}
                 <div className="lg:col-span-2 p-3 rounded-2xl bg-slate-950 border border-sky-500/35 relative">
                   <span className="text-[10px] font-extrabold uppercase text-sky-400 block">
                     1. Total Modal Masuk
@@ -1529,12 +1726,10 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   </p>
                 </div>
 
-                {/* Connector Arrow */}
                 <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-600">
                   <ArrowRight className="w-5 h-5 text-emerald-500/70" />
                 </div>
 
-                {/* Node 2: Split Active Vault vs Sold Outflow */}
                 <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="p-3 rounded-2xl bg-slate-950 border border-amber-500/35">
                     <span className="text-[10px] font-extrabold uppercase text-amber-400 block">
@@ -1575,12 +1770,10 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                   </div>
                 </div>
 
-                {/* Connector Arrow */}
                 <div className="hidden lg:flex lg:col-span-1 justify-center text-slate-600">
                   <ArrowRight className="w-5 h-5 text-emerald-500/70" />
                 </div>
 
-                {/* Node 3: Net Profit & Projected Vault Value */}
                 <div className="lg:col-span-3 p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-1.5">
                   <span className="text-[10px] font-extrabold uppercase text-emerald-400 block">
                     3. Kas Laba & Proyeksi
@@ -1611,243 +1804,38 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            {/* SELL SOON RECOMMENDATIONS (MARKET DROP RADAR + FEATURE #4 BATCH SCAN) */}
-            <div className="rounded-2xl bg-slate-900/85 border border-rose-500/25 p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-rose-300 flex items-center gap-2">
-                    <Flame className="w-4 h-4 text-rose-400" />
-                    <span>Radar Pasar: Saran Jual Cepat & Peluang Naik Harga</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Pindai kondisi pasar seluruh stok aktif untuk mendeteksi harga koreksi maupun kartu yang sedang naik daun
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={isBatchScanning || availableInventory.length === 0}
-                    onClick={handleScanAllMarket}
-                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 text-[11px] font-extrabold flex items-center gap-1.5 shadow-md transition"
-                  >
-                    {isBatchScanning ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Memindai ({Object.keys(marketCache).length}/{availableInventory.length})...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Radar className="w-3.5 h-3.5" />
-                        <span>Scan Semua Market ({availableInventory.length})</span>
-                      </>
-                    )}
-                  </button>
-                  <span className="px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30 text-[11px] font-extrabold text-rose-300">
-                    {analytics.sellRecommendations.length} Sinyal
-                  </span>
-                </div>
+            {/* Category Asset Distribution */}
+            <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-400" />
+                  <span>Distribusi Kategori Stok Aktif</span>
+                </h3>
+                <span className="text-[11px] text-slate-400">{analytics.inStockCount} Item</span>
               </div>
-
-              {analytics.sellRecommendations.length === 0 ? (
-                <p className="text-xs text-slate-400 py-3">
-                  Semua kartu di inventory saat ini memiliki margin aman dan tren stabil.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {analytics.sellRecommendations.map(({ card, marginPct, trendDropPct, reason, urgency, suggestedFastSellPrice, hasLiveCache }) => {
-                    const tcgMeta = getTcgMeta(card.tcg);
-                    const isSurge = urgency === 'SURGE';
-                    return (
-                      <div
-                        key={card.id}
-                        className={`p-3 rounded-2xl bg-slate-950/90 border transition flex flex-col justify-between gap-2.5 ${
-                          isSurge
-                            ? 'border-emerald-500/35 hover:border-emerald-400/60'
-                            : 'border-slate-800 hover:border-rose-500/40'
-                        }`}
-                      >
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${tcgMeta.badgeClass}`}
-                              >
-                                {card.tcg === 'ONE_PIECE' ? 'OP' : 'PKM'}
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-bold text-slate-300">
-                                {card.grade}
-                              </span>
-                              {hasLiveCache && (
-                                <span className="px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-[9px] font-bold text-sky-300">
-                                  LIVE
-                                </span>
-                              )}
-                            </div>
-                            <span
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold flex items-center gap-1 ${
-                                isSurge
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                  : urgency === 'HIGH'
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              }`}
-                            >
-                              {isSurge ? (
-                                <>
-                                  <TrendingUp className="w-3 h-3" />
-                                  <span>Market +{trendDropPct}%</span>
-                                </>
-                              ) : (
-                                <>
-                                  <TrendingDown className="w-3 h-3" />
-                                  <span>Market {trendDropPct}%</span>
-                                </>
-                              )}
-                            </span>
-                          </div>
-
-                          <div>
-                            <h4 className="text-xs font-extrabold text-white truncate">{card.name}</h4>
-                            <p className="text-[10px] text-slate-400">
-                              Modal: <span className="text-slate-200 font-semibold">{formatIDR(card.buyPrice)}</span> • Target:{' '}
-                              <span className="text-slate-200 font-semibold">{formatIDR(card.targetPrice)}</span> (+{marginPct}%)
-                            </p>
-                          </div>
-
-                          <p className="text-[11px] text-slate-300 bg-slate-900/90 p-2 rounded-xl border border-slate-800/80 leading-relaxed">
-                            <ShieldAlert className={`w-3.5 h-3.5 inline mr-1 -mt-0.5 ${isSurge ? 'text-emerald-400' : 'text-amber-400'}`} />
-                            {reason}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-                          <div>
-                            <span className="block text-[9px] text-slate-500 uppercase">
-                              {isSurge ? 'Saran Naik Harga' : 'Saran Harga Cepat'}
-                            </span>
-                            <span className={`text-xs font-extrabold ${isSurge ? 'text-emerald-300' : 'text-amber-300'}`}>
-                              {formatIDR(suggestedFastSellPrice)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openCardDetailWithMarketIntel(card)}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-200"
-                            >
-                              Cek Market
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPosSelectedCardId(card.id);
-                                setPosDealPrice(formatDotInput(suggestedFastSellPrice));
-                                setActiveTab('pos');
-                              }}
-                              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold ${
-                                isSurge
-                                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
-                                  : 'bg-rose-500 hover:bg-rose-400 text-white'
-                              }`}
-                            >
-                              {isSurge ? 'Jual Tinggi' : 'Jual Cepat'}
-                            </button>
-                          </div>
-                        </div>
+              <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                {analytics.categoryStats.map((cat) => {
+                  const pct =
+                    analytics.totalModalStok > 0
+                      ? Math.round((cat.modal / analytics.totalModalStok) * 100)
+                      : 0;
+                  return (
+                    <div key={cat.name} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-bold text-slate-200">
+                          {cat.name} <span className="text-slate-500">({cat.count})</span>
+                        </span>
+                        <span className="font-extrabold text-emerald-300">{formatIDR(cat.modal)}</span>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* 2-Column Compact Analytics & Recent Activity */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Category Asset Distribution */}
-              <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-emerald-400" />
-                    <span>Distribusi Kategori Stok Aktif</span>
-                  </h3>
-                  <span className="text-[11px] text-slate-400">{analytics.inStockCount} Item</span>
-                </div>
-                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-                  {analytics.categoryStats.map((cat) => {
-                    const pct =
-                      analytics.totalModalStok > 0
-                        ? Math.round((cat.modal / analytics.totalModalStok) * 100)
-                        : 0;
-                    return (
-                      <div key={cat.name} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80">
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="font-bold text-slate-200">
-                            {cat.name} <span className="text-slate-500">({cat.count})</span>
-                          </span>
-                          <span className="font-extrabold text-emerald-300">{formatIDR(cat.modal)}</span>
-                        </div>
-                        <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Recent Transactions Compact Feed */}
-              <div className="rounded-2xl bg-slate-900/80 border border-slate-800 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                    <History className="w-4 h-4 text-amber-400" />
-                    <span>Aktivitas Transaksi Terbaru</span>
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('history')}
-                    className="text-[11px] font-bold text-emerald-400 hover:underline"
-                  >
-                    Lihat Semua
-                  </button>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                  {transactions.slice(0, 5).map((trx) => (
-                    <div
-                      key={trx.id}
-                      className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                              trx.type === 'SALE'
-                                ? 'bg-emerald-500/15 text-emerald-300'
-                                : 'bg-amber-500/15 text-amber-300'
-                            }`}
-                          >
-                            {trx.type === 'SALE' ? 'TERJUAL' : 'TRADE-IN'}
-                          </span>
-                          <span className="text-[11px] text-slate-500">{trx.date}</span>
-                        </div>
-                        <p className="text-xs font-bold text-slate-200 truncate mt-0.5">{trx.summary}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p
-                          className={`text-xs font-extrabold ${
-                            trx.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                          }`}
-                        >
-                          {trx.netProfit >= 0 ? '+' : ''}
-                          {formatIDR(trx.netProfit)}
-                        </p>
-                        <p className="text-[10px] text-slate-500">Profit</p>
+                      <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400"
+                          style={{ width: `${pct}%` }}
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1856,9 +1844,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 2: INVENTORY AKTIF ==================== */}
         {activeTab === 'inventory' && (
           <div className="space-y-4">
-            {/* Compact Search & Filter Bar */}
             <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-3 space-y-2.5">
-              {/* TCG Switcher Pills */}
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
                 <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
                   <button
@@ -1895,9 +1881,20 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     One Piece ({analytics.onePieceCount})
                   </button>
                 </div>
-                <span className="text-[11px] text-slate-400">
-                  Menampilkan <strong className="text-slate-200">{filteredCards.length}</strong> kartu aktif
-                </span>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    Menampilkan <strong className="text-slate-200">{filteredCards.length}</strong> kartu aktif
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleExportInventoryExcel}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 transition"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Export Excel (.xls)</span>
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2">
@@ -1977,7 +1974,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            {/* 4-Column Compact Card Grid */}
             {filteredCards.length === 0 ? (
               <div className="rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 p-10 text-center">
                 <Package className="w-10 h-10 text-slate-600 mx-auto mb-2" />
@@ -2001,7 +1997,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                       className="group cursor-pointer rounded-2xl bg-slate-900/90 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 transition-all overflow-hidden flex flex-col justify-between shadow-lg"
                     >
                       <div>
-                        {/* Compact Card Artwork Header */}
                         <div className="relative h-40 bg-slate-950 overflow-hidden border-b border-slate-800/80">
                           {card.imageUrl ? (
                             <img
@@ -2018,7 +2013,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             </div>
                           )}
 
-                          {/* Top Badges */}
                           <div className="absolute top-2 left-2 flex flex-wrap items-center gap-1 max-w-[78%]">
                             <span
                               className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border ${tcgMeta.badgeClass}`}
@@ -2039,7 +2033,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             </span>
                           </div>
 
-                          {/* Top-Right Quick Edit/Delete */}
                           <div className="absolute top-2 right-2 flex items-center gap-1 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition">
                             <button
                               type="button"
@@ -2060,7 +2053,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                           </div>
                         </div>
 
-                        {/* Card Info */}
                         <div className="p-3 space-y-2">
                           <div>
                             <h3 className="text-xs sm:text-sm font-extrabold text-white line-clamp-1 group-hover:text-emerald-300 transition">
@@ -2085,7 +2077,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                             </span>
                           </div>
 
-                          {/* Modal & Target Price */}
                           <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                             <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800/80">
                               <span className="block text-[10px] text-slate-500">Modal HPP</span>
@@ -2101,7 +2092,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                         </div>
                       </div>
 
-                      {/* 2x2 Direct Market Links & Action Footer */}
                       <div className="px-3 pb-3 pt-1 space-y-2">
                         <div className="grid grid-cols-2 gap-1.5">
                           <a
@@ -2203,7 +2193,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 </div>
               </div>
 
-              {/* TCG Switcher Pills for Sold Cards */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
                 <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
                   <button
@@ -2331,7 +2320,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 4: KASIR / PENJUALAN (POS) ==================== */}
         {activeTab === 'pos' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            {/* Left: Search & Pick Active Inventory Card */}
             <div className="lg:col-span-7 rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
@@ -2400,7 +2388,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            {/* Right: Deal Price & Instant Profit Calculation */}
             <form
               onSubmit={handleCompleteSale}
               className="lg:col-span-5 rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-4 h-fit"
@@ -2455,7 +2442,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 />
               </div>
 
-              {/* Instant Profit Box */}
               <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
                 <div className="flex justify-between text-xs">
                   <span className="text-slate-400">Harga Laku</span>
@@ -2492,7 +2478,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 5: TUKAR TAMBAH (TRADE-IN) ==================== */}
         {activeTab === 'trade' && (
           <form onSubmit={handleExecuteTradeIn} className="space-y-4">
-            {/* Top Cash Delta Scheme (2 Columns) */}
             <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
@@ -2536,9 +2521,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            {/* Middle 2 Columns: Cards Out vs Cards In */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Left: Cards Out from Store */}
               <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs sm:text-sm font-extrabold text-rose-300">
@@ -2600,7 +2583,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 </div>
               </div>
 
-              {/* Right: Cards In to Inventory */}
               <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs sm:text-sm font-extrabold text-emerald-300">
@@ -2822,7 +2804,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
               </div>
             </div>
 
-            {/* Bottom Summary & Execute Trade-In */}
             <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs text-slate-400">
@@ -2866,7 +2847,7 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
         {/* ==================== TAB 6: RIWAYAT & LABA ==================== */}
         {activeTab === 'history' && (
           <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap flex-1 items-center gap-2">
                 <div className="relative flex-1 min-w-[200px] max-w-md">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -2878,6 +2859,24 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
+
+                <div className="relative flex items-center">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 pointer-events-none" />
+                  <select
+                    value={historyMonthFilter}
+                    onChange={(e) => setHistoryMonthFilter(e.target.value)}
+                    className="pl-8 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold text-amber-200 focus:outline-none focus:border-amber-400"
+                    title="Filter Bulan Transaksi"
+                  >
+                    <option value="ALL">Semua Bulan</option>
+                    {availableMonths.map((ym) => (
+                      <option key={ym} value={ym}>
+                        {formatMonthLabel(ym)} ({ym})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <select
                   value={historyTcgFilter}
                   onChange={(e) => setHistoryTcgFilter(e.target.value)}
@@ -2899,14 +2898,24 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
                 </select>
               </div>
 
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 self-start sm:self-auto"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-extrabold flex items-center gap-1.5 transition"
+                >
+                  <Download className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportHistoryExcel}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 transition"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Export Excel (.xls)</span>
+                </button>
+              </div>
             </div>
 
             <div className="rounded-2xl bg-slate-900/85 border border-slate-800 overflow-hidden">
@@ -2985,152 +2994,6 @@ Kembalikan HANYA format JSON valid tanpa markdown dengan struktur:
             </div>
           </div>
         )}
-
-        {/* ==================== TAB 7: NESTJS, GITHUB & VERCEL BLUEPRINT ==================== */}
-        {activeTab === 'architecture' && (
-          <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
-                  <Database className="w-4 h-4 text-emerald-400" />
-                  <span>Blueprint Produksi: NestJS + PostgreSQL (Prisma) + GitHub + Vercel</span>
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Gunakan skema database & service di bawah ini untuk menyimpan data inventory dan foto kartu secara online di cloud.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 text-[11px] font-bold text-slate-300">
-                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-1">
-                  <GitBranch className="w-3.5 h-3.5 text-amber-400" /> GitHub CI/CD
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-1">
-                  <Globe className="w-3.5 h-3.5 text-emerald-400" /> Vercel Serverless
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Prisma Schema */}
-              <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-emerald-300">prisma/schema.prisma</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyToClipboard(
-                        `model PokemonCard {
-  id              String   @id @default(cuid())
-  name            String
-  setName         String
-  number          String
-  language        String
-  category        String
-  gradingCompany  String   @default("Raw")
-  grade           String   @default("Raw NM/M")
-  storageLocation String
-  buyPrice        Int
-  targetPrice     Int
-  soldPrice       Int?
-  status          String   @default("IN_STOCK")
-  imageUrl        String?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-model Transaction {
-  id        String   @id @default(cuid())
-  type      String   // SALE | TRADE_IN
-  summary   String
-  revenue   Int
-  costBasis Int
-  netProfit Int
-  cashDelta Int      @default(0)
-  notes     String?
-  createdAt DateTime @default(now())
-}`,
-                        'Schema Prisma disalin!'
-                      )
-                    }
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" /> Salin Schema
-                  </button>
-                </div>
-                <pre className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 overflow-x-auto max-h-64">
-{`model PokemonCard {
-  id              String   @id @default(cuid())
-  name            String
-  setName         String
-  number          String
-  language        String
-  category        String
-  gradingCompany  String   @default("Raw")
-  grade           String   @default("Raw NM/M")
-  storageLocation String
-  buyPrice        Int
-  targetPrice     Int
-  soldPrice       Int?
-  status          String   @default("IN_STOCK")
-  imageUrl        String?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-model Transaction {
-  id        String   @id @default(cuid())
-  type      String   // SALE | TRADE_IN
-  summary   String
-  revenue   Int
-  costBasis Int
-  netProfit Int
-  cashDelta Int      @default(0)
-  notes     String?
-  createdAt DateTime @default(now())
-}`}
-                </pre>
-              </div>
-
-              {/* Vercel Config & Deployment Steps */}
-              <div className="rounded-2xl bg-slate-900/85 border border-slate-800 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-amber-300">vercel.json & Langkah Deploy</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyToClipboard(
-                        `{
-  "version": 2,
-  "builds": [{ "src": "src/main.ts", "use": "@vercel/node" }],
-  "routes": [{ "src": "/(.*)", "dest": "src/main.ts", "methods": ["GET","POST","PATCH","DELETE","OPTIONS"] }]
-}`,
-                        'Konfigurasi vercel.json disalin!'
-                      )
-                    }
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" /> Salin vercel.json
-                  </button>
-                </div>
-                <pre className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 overflow-x-auto">
-{`{
-  "version": 2,
-  "builds": [{ "src": "src/main.ts", "use": "@vercel/node" }],
-  "routes": [
-    { "src": "/(.*)", "dest": "src/main.ts", "methods": ["GET","POST","PATCH","DELETE","OPTIONS"] }
-  ]
-}`}
-                </pre>
-                <ul className="text-[11px] text-slate-400 space-y-1 pt-1 list-disc list-inside">
-                  <li>Buat database PostgreSQL gratis di <span className="text-slate-200 font-semibold">Neon / Supabase</span> lalu salin <code className="text-emerald-300">DATABASE_URL</code>.</li>
-                  <li>Gunakan <span className="text-slate-200 font-semibold">Cloudinary</span> untuk menyimpan foto kartu agar database tetap ringan.</li>
-                  <li>Push repo ke <span className="text-slate-200 font-semibold">GitHub</span> lalu import ke <span className="text-slate-200 font-semibold">Vercel</span> untuk auto-deploy.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
 
       {/* ==================== MODAL 1: CARD DETAIL & LIVE MARKET INTEL ==================== */}
@@ -3143,7 +3006,6 @@ model Transaction {
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-4 sm:p-6 space-y-4"
           >
-            {/* Modal Header */}
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -3180,7 +3042,6 @@ model Transaction {
               </button>
             </div>
 
-            {/* Image + Inventory Financials */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
               <div className="sm:col-span-4 rounded-2xl bg-slate-950 border border-slate-800 h-52 flex items-center justify-center p-2">
                 {selectedDetailCard.imageUrl ? (
@@ -3216,7 +3077,6 @@ model Transaction {
                   </div>
                 </div>
 
-                {/* 4 Direct Platform Links */}
                 {(() => {
                   const links = getMarketAppLinks(selectedDetailCard);
                   return (
@@ -3265,7 +3125,6 @@ model Transaction {
                   );
                 })()}
 
-                {/* Live Market Intelligence Box */}
                 <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
@@ -3341,7 +3200,6 @@ model Transaction {
               </div>
             </div>
 
-            {/* Modal Footer Actions */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800">
               <div className="flex items-center gap-2">
                 <button
@@ -3416,7 +3274,6 @@ model Transaction {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {/* TCG Selector */}
               <div className="sm:col-span-2">
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
                   Seri Permainan Kartu (TCG)
@@ -3505,7 +3362,6 @@ model Transaction {
                 </select>
               </div>
 
-              {/* Category with Instant Add */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-300">Kategori</label>
@@ -3576,7 +3432,6 @@ model Transaction {
                 )}
               </div>
 
-              {/* Grading Company & Grade */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
                   Jenis Grading / Raw
@@ -3614,7 +3469,6 @@ model Transaction {
                 />
               </div>
 
-              {/* Storage Location with Instant Add */}
               <div className="sm:col-span-2">
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-300">Lokasi Penyimpanan Fisik</label>
@@ -3685,7 +3539,6 @@ model Transaction {
                 )}
               </div>
 
-              {/* Buy Price & Target Price with Auto Dot Formatting */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
                   Harga Modal Kartu / HPP (IDR) *
@@ -3731,9 +3584,8 @@ model Transaction {
               </div>
             </div>
 
-            {/* Photo Upload, Direct Camera or URL */}
             <div className="space-y-2 pt-1">
-              <label className="block text-xs font-bold text-slate-300">Foto Kartu Pokémon</label>
+              <label className="block text-xs font-bold text-slate-300">Foto Kartu TCG</label>
               <div className="flex flex-wrap items-center gap-2">
                 <label className="cursor-pointer px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-bold text-emerald-300 flex items-center gap-1.5">
                   <Camera className="w-3.5 h-3.5" />
@@ -3898,7 +3750,7 @@ model Transaction {
             <div className="flex items-center justify-between">
               <h2 className="text-base font-black text-white flex items-center gap-2">
                 <Tags className="w-4 h-4 text-amber-400" />
-                <span>Kategori Produk Pokémon</span>
+                <span>Kategori Produk TCG</span>
               </h2>
               <button
                 type="button"
